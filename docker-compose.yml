@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  # MongoDB
+  mongodb:
+    image: mongo:7
+    container_name: xcloud-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: xCloud
+    networks:
+      - xcloud-net
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # xCloud-CNMS
+  xcloud-cnms:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: xcloud-cnms
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.json:/app/config/config.json:ro
+      - /var/log/xCloud:/var/log/xCloud:ro
+    environment:
+      - TZ=Asia/Shanghai
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - xcloud-net
+
+networks:
+  xcloud-net:
+    driver: bridge
+
+volumes:
+  mongo_data:

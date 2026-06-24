@@ -1,0 +1,41 @@
+# Dependencies
+frontend/node_modules/
+
+# Build outputs
+frontend/dist/
+backend/public/dist/
+
+# Compiled binary
+backend/xcloud-cnms
+backend/xcloud-cnms.bak
+backend/xcloud-monitor
+backend/xcloud-monitor.bak
+
+# Uploads (user data)
+backend/uploads/
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Docker volumes
+mongo-data/
+
+# Claude settings (optional, can be ignored)
+# .claude/

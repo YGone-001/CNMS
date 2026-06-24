@@ -1,0 +1,21 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8080
+  },
+  "mongodb": {
+    "uri": "mongodb://mongodb:27017",
+    "database": "xCloud"
+  },
+  "log_dir": "/var/log/xCloud",
+  "notify": {
+    "webhook_url": "",
+    "min_level": "major"
+  },
+  "auth": {
+    "enabled": false,
+    "username": "admin",
+    "password": "admin123",
+    "jwt_key": "xcloud-cnms-secret-key-change-me"
+  }
+}

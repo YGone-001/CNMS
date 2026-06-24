@@ -1,0 +1,126 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =========================================================================
+   Theme Color Tokens (CSS Custom Properties)
+
+   Dark theme = Huawei NOC deep navy (default)
+   Light theme = Huawei iMaster NCE blue-white
+   ========================================================================= */
+
+:root,
+html[data-theme='dark'] {
+  --noc-bg:        #0B1120;
+  --noc-surface:   #151E32;
+  --noc-border:    #2A3441;
+  --noc-accent:    #3B82F6;
+  --noc-text:      #F1F5F9;
+  --noc-muted:     #94A3B8;
+  --noc-success:   #22C55E;
+  --noc-error:     #EF4444;
+  --noc-warning:   #F59E0B;
+  --noc-terminal:  #000000;
+
+  /* Pre-composed opacity variants (Tailwind /opacity doesn't work with CSS vars) */
+  --noc-accent-10:  #3B82F61A;
+  --noc-accent-20:  #3B82F633;
+  --noc-accent-30:  #3B82F64D;
+  --noc-accent-40:  #3B82F666;
+  --noc-error-10:   #EF44441A;
+  --noc-error-30:   #EF44444D;
+  --noc-warning-10: #F59E0B1A;
+  --noc-warning-20: #F59E0B33;
+  --noc-success-10: #22C55E1A;
+  --noc-success-20: #22C55E33;
+  --noc-bg-50:      #0B112080;
+  --noc-border-30:  #2A34414D;
+  --noc-border-50:  #2A344180;
+  --noc-muted-10:   #94A3B81A;
+}
+
+html[data-theme='light'] {
+  --noc-bg:        #F0F2F5;
+  --noc-surface:   #FFFFFF;
+  --noc-border:    #D4D7DC;
+  --noc-accent:    #1890FF;
+  --noc-text:      #1D2129;
+  --noc-muted:     #86909C;
+  --noc-success:   #00B42A;
+  --noc-error:     #F53F3F;
+  --noc-warning:   #FF7D00;
+  --noc-terminal:  #F7F8FA;
+
+  --noc-accent-10:  #1890FF1A;
+  --noc-accent-20:  #1890FF33;
+  --noc-accent-30:  #1890FF4D;
+  --noc-accent-40:  #1890FF66;
+  --noc-error-10:   #F53F3F1A;
+  --noc-error-30:   #F53F3F4D;
+  --noc-warning-10: #FF7D001A;
+  --noc-warning-20: #FF7D0033;
+  --noc-success-10: #00B42A1A;
+  --noc-success-20: #00B42A33;
+  --noc-bg-50:      #F0F2F580;
+  --noc-border-30:  #D4D7DC4D;
+  --noc-border-50:  #D4D7DC80;
+  --noc-muted-10:   #86909C1A;
+}
+
+/* Scrollbar theming */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--noc-bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--noc-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--noc-accent);
+}
+
+/* Global font and box model */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Focus-visible ring for accessibility */
+:focus-visible {
+  outline: 2px solid var(--noc-accent);
+  outline-offset: 2px;
+}
+
+/* Remove default outline for mouse users */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Screen reader only utility */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
