@@ -2,18 +2,24 @@
 // Only this file and zh.ts are allowed to contain string literals
 
 const en = {
-  // Sidebar navigation groups
+  // Sidebar navigation - flat 9-item structure
   nav: {
+    // Main 9 menu items
+    overview: 'Operations Overview',
+    topology: 'Network Topology',
+    networkElements: 'Network Elements',
+    agentManagement: 'Agent Management',
+    metricsHistory: 'Real-time Metrics',
+    alarms: 'Alarm Center',
+    aiops: 'Fault Diagnosis',
+    faultResolution: 'Fault Resolution',
+    logCenter: 'Log Center',
+
+    // Legacy items (kept for backward compatibility)
     dashboards: 'Dashboards',
-    overview: 'Overview',
-    topology: 'Topology',
     faultPerf: 'Fault & Performance',
-    alarms: 'Alarms',
-    metricsHistory: 'Metrics History',
-    aiops: 'AIOps',
     reports: 'Reports',
     opsMaint: 'Operation & Maintenance',
-    networkElements: 'Network Elements',
     subscribers: 'Subscribers',
     mmlTerminal: 'MML Terminal',
     configBackups: 'Config Backups',

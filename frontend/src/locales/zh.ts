@@ -4,18 +4,24 @@
 import type { Locale } from './en';
 
 const zh = {
-  // Sidebar navigation groups
+  // Sidebar navigation - flat 9-item structure
   nav: {
-    dashboards: '仪表盘',
-    overview: '概览',
+    // Main 9 menu items
+    overview: '运维总览',
     topology: '网络拓扑',
+    networkElements: '网元管理',
+    agentManagement: 'Agent 管理',
+    metricsHistory: '实时指标',
+    alarms: '告警中心',
+    aiops: '故障诊断',
+    faultResolution: '故障处置',
+    logCenter: '日志中心',
+
+    // Legacy items (kept for backward compatibility)
+    dashboards: '仪表盘',
     faultPerf: '告警与性能',
-    alarms: '告警管理',
-    metricsHistory: '指标历史',
-    aiops: '智能运维',
     reports: '报表分析',
     opsMaint: '运维管理',
-    networkElements: '网元管理',
     subscribers: '订户管理',
     mmlTerminal: 'MML 终端',
     configBackups: '配置备份',

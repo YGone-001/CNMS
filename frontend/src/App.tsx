@@ -3,29 +3,18 @@ import { HashRouter, Routes, Route, Link, useLocation, Outlet } from 'react-rout
 import {
   LayoutDashboard,
   Server,
-  Terminal,
   Bell,
   Radio,
-  Users,
   Network,
   LogOut,
   Activity,
   FileText,
-  Clock,
-  Shield,
-  BookOpen,
-  Globe,
-  Database,
-  BarChart3,
   Brain,
-  Library,
-  ChevronDown,
-  Gauge,
-  Wrench,
-  Settings,
   PanelLeftClose,
   PanelLeftOpen,
   Search,
+  Wifi,
+  Lightbulb,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { MonitorProvider } from '@/context/MonitorContext';
@@ -51,6 +40,9 @@ import AIOps from './pages/AIOps';
 import KnowledgeBase from './pages/KnowledgeBase';
 import KnowledgeBaseDetail from './pages/KnowledgeBaseDetail';
 import KnowledgeBaseEdit from './pages/KnowledgeBaseEdit';
+import AgentManagement from './pages/AgentManagement';
+import FaultResolution from './pages/FaultResolution';
+import LogCenter from './pages/LogCenter';
 
 // Auth helpers
 function getAuthToken(): string | null {
@@ -78,7 +70,7 @@ export async function authFetch(url: string, options: RequestInit = {}): Promise
 }
 
 // ---------------------------------------------------------------------------
-// Sidebar Navigation - Grouped Structure with Collapse and Badges
+// Sidebar Navigation - Flat Structure (9 main items)
 // ---------------------------------------------------------------------------
 
 interface NavItem {
@@ -88,232 +80,28 @@ interface NavItem {
   badge?: number; // optional alarm badge count
 }
 
-interface NavGroup {
-  id: string;
-  label: string;
-  icon: LucideIcon;
-  items: NavItem[];
-}
-
-// Build navigation groups using translation function
-function useNavGroups(): NavGroup[] {
+// Build flat navigation list using translation function
+function useNavItems(): NavItem[] {
   const { t } = useI18n();
   return useMemo(() => [
-    {
-      id: 'dashboards',
-      label: t('nav.dashboards'),
-      icon: Gauge,
-      items: [
-        { path: '/', label: t('nav.overview'), icon: LayoutDashboard },
-        { path: '/topology', label: t('nav.topology'), icon: Network },
-      ],
-    },
-    {
-      id: 'fault-perf',
-      label: t('nav.faultPerf'),
-      icon: Activity,
-      items: [
-        { path: '/alarms', label: t('nav.alarms'), icon: Bell, badge: 12 },
-        { path: '/metrics', label: t('nav.metricsHistory'), icon: Activity },
-        { path: '/aiops', label: t('nav.aiops'), icon: Brain },
-        { path: '/reports', label: t('nav.reports'), icon: BarChart3 },
-      ],
-    },
-    {
-      id: 'ops-maint',
-      label: t('nav.opsMaint'),
-      icon: Wrench,
-      items: [
-        { path: '/elements', label: t('nav.networkElements'), icon: Server },
-        { path: '/subscribers', label: t('nav.subscribers'), icon: Users },
-        { path: '/mml', label: t('nav.mmlTerminal'), icon: Terminal },
-        { path: '/backups', label: t('nav.configBackups'), icon: Database },
-        { path: '/tasks', label: t('nav.cronTasks'), icon: Clock },
-        { path: '/kb', label: t('nav.knowledgeBase'), icon: Library },
-      ],
-    },
-    {
-      id: 'sys-admin',
-      label: t('nav.sysAdmin'),
-      icon: Settings,
-      items: [
-        { path: '/audit', label: t('nav.auditLogs'), icon: FileText },
-        { path: '/users', label: t('nav.userManagement'), icon: Shield },
-        { path: '/sites', label: t('nav.siteSettings'), icon: Globe },
-        { path: '/docs', label: t('nav.apiDocs'), icon: BookOpen },
-      ],
-    },
+    { path: '/', label: t('nav.overview'), icon: LayoutDashboard },
+    { path: '/topology', label: t('nav.topology'), icon: Network },
+    { path: '/elements', label: t('nav.networkElements'), icon: Server },
+    { path: '/agents', label: t('nav.agentManagement'), icon: Wifi },
+    { path: '/metrics', label: t('nav.metricsHistory'), icon: Activity },
+    { path: '/alarms', label: t('nav.alarms'), icon: Bell, badge: 12 },
+    { path: '/aiops', label: t('nav.aiops'), icon: Brain },
+    { path: '/fault-resolution', label: t('nav.faultResolution'), icon: Lightbulb },
+    { path: '/logs', label: t('nav.logCenter'), icon: FileText },
   ], [t]);
 }
 
-// Determine which groups should be expanded by default
-function getDefaultExpanded(locationPathname: string, groups: NavGroup[]): Set<string> {
-  const expanded = new Set<string>(['dashboards']);
-  for (const group of groups) {
-    for (const item of group.items) {
-      const isMatch = item.path === '/'
-        ? locationPathname === '/'
-        : locationPathname.startsWith(item.path);
-      if (isMatch) {
-        expanded.add(group.id);
-        break;
-      }
-    }
-  }
-  return expanded;
-}
-
-// Single nav item link - adapts to collapsed/expanded state
-// Cyber-tech active styling: gradient glow + light-saber border + inset shadow
-function NavLink({ item, isActive, collapsed }: { item: NavItem; isActive: boolean; collapsed: boolean }) {
-  const Icon = item.icon;
-  const hasBadge = typeof item.badge === 'number' && item.badge > 0;
-
-  if (collapsed) {
-    // Collapsed mode: icon only with title tooltip and optional red dot
-    return (
-      <Link
-        to={item.path}
-        title={item.label}
-        aria-current={isActive ? 'page' : undefined}
-        className={`relative flex items-center justify-center w-10 h-10 mx-auto rounded-md transition-all duration-200 ${
-          isActive
-            ? 'bg-gradient-to-r from-sky-500/15 to-transparent text-sky-400 shadow-[inset_2px_0_4px_rgba(14,165,233,0.12)]'
-            : 'text-noc-muted hover:text-noc-text hover:bg-noc-bg-50'
-        }`}
-      >
-        <Icon className="w-5 h-5 shrink-0" aria-hidden="true" />
-        {/* Active left indicator bar in collapsed mode */}
-        {isActive && (
-          <span className="absolute left-0 top-2 bottom-2 w-[2px] rounded-full bg-sky-500" />
-        )}
-        {/* Red dot indicator for badge in collapsed mode */}
-        {hasBadge && (
-          <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse" />
-        )}
-      </Link>
-    );
-  }
-
-  // Expanded mode: full row with icon, label, and optional numeric badge
-  return (
-    <Link
-      to={item.path}
-      aria-current={isActive ? 'page' : undefined}
-      className={`flex items-center gap-3 px-4 py-2 mx-2 rounded-md text-sm transition-all duration-200 border-l-2 ${
-        isActive
-          ? 'bg-gradient-to-r from-sky-500/10 to-transparent text-sky-400 border-sky-500 shadow-[inset_2px_0_4px_rgba(14,165,233,0.1)]'
-          : 'text-noc-muted hover:text-noc-text hover:bg-noc-bg-50 border-transparent'
-      }`}
-    >
-      <Icon className="w-4 h-4 shrink-0" aria-hidden="true" />
-      <span className="truncate flex-1">{item.label}</span>
-      {/* Numeric badge capsule */}
-      {hasBadge && (
-        <span className="px-1.5 py-0.5 rounded-full bg-red-600 text-white text-[10px] font-bold leading-none min-w-[18px] text-center">
-          {item.badge}
-        </span>
-      )}
-    </Link>
-  );
-}
-
-// Collapsible nav group - adapts to collapsed/expanded sidebar
-// filteredItems: items that match the current search (subset of group.items)
-function NavGroupSection({
-  group,
-  filteredItems,
-  isExpanded,
-  onToggle,
-  activePath,
-  collapsed,
-}: {
-  group: NavGroup;
-  filteredItems: NavItem[];
-  isExpanded: boolean;
-  onToggle: () => void;
-  activePath: string;
-  collapsed: boolean;
-}) {
-  const GroupIcon = group.icon;
-  const hasActive = filteredItems.some((item) =>
-    item.path === '/' ? activePath === '/' : activePath.startsWith(item.path)
-  );
-
-  if (collapsed) {
-    // Collapsed mode: show group icon centered (non-clickable separator)
-    // Each item is rendered directly as an icon button
-    return (
-      <div className="mb-2">
-        <div className="flex justify-center py-1.5">
-          <GroupIcon
-            className={`w-4 h-4 ${hasActive ? 'text-sky-400' : 'text-noc-muted'}`}
-            aria-hidden="true"
-          />
-        </div>
-        <div className="space-y-1">
-          {filteredItems.map((item) => {
-            const isActive = item.path === '/'
-              ? activePath === '/'
-              : activePath.startsWith(item.path);
-            return <NavLink key={item.path} item={item} isActive={isActive} collapsed />;
-          })}
-        </div>
-      </div>
-    );
-  }
-
-  // Expanded mode: full group with header and collapsible content
-  return (
-    <div className="mb-1">
-      {/* Group header */}
-      <button
-        onClick={onToggle}
-        className={`w-full flex items-center justify-between px-4 py-2 mx-2 rounded-md text-xs font-semibold uppercase tracking-wider transition-colors ${
-          hasActive
-            ? 'text-sky-400'
-            : 'text-noc-muted hover:text-noc-text'
-        }`}
-        aria-expanded={isExpanded}
-      >
-        <span className="flex items-center gap-2">
-          <GroupIcon className="w-3.5 h-3.5" aria-hidden="true" />
-          {group.label}
-        </span>
-        <ChevronDown
-          className={`w-3.5 h-3.5 transition-transform duration-300 ease-in-out ${
-            isExpanded ? 'rotate-0' : '-rotate-90'
-          }`}
-          aria-hidden="true"
-        />
-      </button>
-
-      {/* Smooth collapsible content using grid trick */}
-      <div
-        className={`grid transition-all duration-300 ease-in-out ${
-          isExpanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
-        }`}
-      >
-        <div className="overflow-hidden">
-          <div className="py-1 space-y-0.5">
-            {filteredItems.map((item) => {
-              const isActive = item.path === '/'
-                ? activePath === '/'
-                : activePath.startsWith(item.path);
-              return <NavLink key={item.path} item={item} isActive={isActive} collapsed={false} />;
-            })}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Main Sidebar component with collapse, search filter, and alarm badges
+// Keep NavGroup interface for backward compatibility (unused but safe)
+// Main Sidebar component - Flat 9-item navigation
 function Sidebar({ onLogout }: { onLogout: () => void }) {
   const location = useLocation();
   const { t } = useI18n();
-  const navGroups = useNavGroups();
+  const navItems = useNavItems();
 
   // Sidebar collapse state
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
@@ -321,74 +109,12 @@ function Sidebar({ onLogout }: { onLogout: () => void }) {
   // Global search filter state
   const [searchTerm, setSearchTerm] = useState<string>('');
 
-  // Initialize expanded groups: dashboards + active route group
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() =>
-    getDefaultExpanded(location.pathname, navGroups)
-  );
-
-  // Auto-expand group when route changes
-  useEffect(() => {
-    setExpandedGroups((prev) => {
-      const next = new Set(prev);
-      for (const group of navGroups) {
-        for (const item of group.items) {
-          const isMatch = item.path === '/'
-            ? location.pathname === '/'
-            : location.pathname.startsWith(item.path);
-          if (isMatch) {
-            next.add(group.id);
-            break;
-          }
-        }
-      }
-      return next;
-    });
-  }, [location.pathname]);
-
-  // Filtered groups: each group gets its matching items; empty groups are excluded
-  // Groups with matches are forced expanded regardless of user toggle state
-  const { filteredGroups, forcedExpanded } = useMemo(() => {
+  // Filtered items based on search
+  const filteredItems = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
-    if (!term) {
-      return { filteredGroups: navGroups.map((g) => ({ group: g, items: g.items })), forcedExpanded: new Set<string>() };
-    }
-
-    const forced = new Set<string>();
-    const result: { group: NavGroup; items: NavItem[] }[] = [];
-
-    for (const group of navGroups) {
-      const matched = group.items.filter((item) =>
-        item.label.toLowerCase().includes(term)
-      );
-      if (matched.length > 0) {
-        result.push({ group, items: matched });
-        forced.add(group.id);
-      }
-    }
-
-    return { filteredGroups: result, forcedExpanded: forced };
-  }, [searchTerm, navGroups]);
-
-  // Effective expanded state: merge user toggled + forced by search
-  const effectiveExpanded = useMemo(() => {
-    const merged = new Set(expandedGroups);
-    for (const id of forcedExpanded) {
-      merged.add(id);
-    }
-    return merged;
-  }, [expandedGroups, forcedExpanded]);
-
-  const toggleGroup = useCallback((groupId: string) => {
-    setExpandedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(groupId)) {
-        next.delete(groupId);
-      } else {
-        next.add(groupId);
-      }
-      return next;
-    });
-  }, []);
+    if (!term) return navItems;
+    return navItems.filter((item) => item.label.toLowerCase().includes(term));
+  }, [searchTerm, navItems]);
 
   const toggleCollapsed = useCallback(() => {
     setIsCollapsed((prev) => !prev);
@@ -397,6 +123,12 @@ function Sidebar({ onLogout }: { onLogout: () => void }) {
   const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setSearchTerm(e.target.value);
   }, []);
+
+  // Check if a nav item is active
+  const isActive = useCallback((itemPath: string) => {
+    if (itemPath === '/') return location.pathname === '/';
+    return location.pathname.startsWith(itemPath);
+  }, [location.pathname]);
 
   return (
     <aside
@@ -444,21 +176,74 @@ function Sidebar({ onLogout }: { onLogout: () => void }) {
         </div>
       )}
 
-      {/* Navigation groups */}
+      {/* Flat navigation list - 9 main items */}
       <nav className="flex-1 py-2 overflow-y-auto" role="navigation" aria-label="Main navigation">
-        {filteredGroups.map(({ group, items }) => (
-          <NavGroupSection
-            key={group.id}
-            group={group}
-            filteredItems={items}
-            isExpanded={effectiveExpanded.has(group.id)}
-            onToggle={() => toggleGroup(group.id)}
-            activePath={location.pathname}
-            collapsed={isCollapsed}
-          />
-        ))}
+        <div className="space-y-0.5 px-2">
+          {filteredItems.map((item) => {
+            const Icon = item.icon;
+            const active = isActive(item.path);
+            const hasBadge = typeof item.badge === 'number' && item.badge > 0;
+
+            if (isCollapsed) {
+              // Collapsed mode: icon only with tooltip
+              return (
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  title={item.label}
+                  aria-current={active ? 'page' : undefined}
+                  className={`relative flex items-center justify-center w-10 h-10 mx-auto rounded-md transition-all duration-200 ${
+                    active
+                      ? 'bg-gradient-to-r from-sky-500/15 to-transparent text-sky-400 shadow-[inset_2px_0_4px_rgba(14,165,233,0.12)]'
+                      : 'text-noc-muted hover:text-noc-text hover:bg-noc-bg-50'
+                  }`}
+                >
+                  <Icon className="w-5 h-5 shrink-0" aria-hidden="true" />
+                  {/* Active left indicator bar */}
+                  {active && (
+                    <span className="absolute left-0 top-2 bottom-2 w-[2px] rounded-full bg-sky-500" />
+                  )}
+                  {/* Red dot for badge */}
+                  {hasBadge && (
+                    <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse" />
+                  )}
+                </Link>
+              );
+            }
+
+            // Expanded mode: full row with icon, label, and optional badge
+            return (
+              <Link
+                key={item.path}
+                to={item.path}
+                aria-current={active ? 'page' : undefined}
+                className={`group flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-all duration-200 ${
+                  active
+                    ? 'bg-gradient-to-r from-sky-500/15 to-transparent text-sky-400 shadow-[inset_2px_0_4px_rgba(14,165,233,0.12)]'
+                    : 'text-noc-muted hover:text-noc-text hover:bg-noc-bg-50'
+                }`}
+              >
+                <span className="relative flex-shrink-0">
+                  <Icon className="w-5 h-5" aria-hidden="true" />
+                  {/* Active left indicator bar */}
+                  {active && (
+                    <span className="absolute -left-3 top-1 bottom-1 w-[2px] rounded-full bg-sky-500" />
+                  )}
+                </span>
+                <span className="flex-1 truncate">{item.label}</span>
+                {/* Badge count */}
+                {hasBadge && (
+                  <span className="flex-shrink-0 px-2 py-0.5 text-xs font-medium bg-red-600 text-white rounded-full">
+                    {item.badge}
+                  </span>
+                )}
+              </Link>
+            );
+          })}
+        </div>
+
         {/* Empty state when search yields no results */}
-        {filteredGroups.length === 0 && !isCollapsed && (
+        {filteredItems.length === 0 && !isCollapsed && (
           <div className="px-4 py-8 text-center text-xs text-noc-muted">
             {t('sidebar.noMatch')}
           </div>
@@ -469,7 +254,7 @@ function Sidebar({ onLogout }: { onLogout: () => void }) {
       <div className={`py-3 border-t border-noc-border flex items-center ${
         isCollapsed ? 'justify-center px-2' : 'justify-between px-5'
       }`}>
-        {!isCollapsed && <span className="text-xs text-noc-muted">v1.4.0</span>}
+        {!isCollapsed && <span className="text-xs text-noc-muted">v1.4.1</span>}
         <button
           onClick={onLogout}
           className="p-1 text-noc-muted hover:text-noc-error transition-colors"
@@ -563,20 +348,26 @@ export default function App() {
     <HashRouter>
       <Routes>
         <Route element={<AppLayout onLogout={handleLogout} />}>
+          {/* Main 9 menu items */}
           <Route path="/" element={<Overview />} />
-          <Route path="/elements" element={<NetworkElements />} />
           <Route path="/topology" element={<Topology />} />
+          <Route path="/elements" element={<NetworkElements />} />
+          <Route path="/agents" element={<AgentManagement />} />
+          <Route path="/metrics" element={<MetricsHistory />} />
+          <Route path="/alarms" element={<Alarms />} />
+          <Route path="/aiops" element={<AIOps />} />
+          <Route path="/fault-resolution" element={<FaultResolution />} />
+          <Route path="/logs" element={<LogCenter />} />
+
+          {/* Legacy routes (keep for backward compatibility) */}
           <Route path="/subscribers" element={<Subscribers />} />
           <Route path="/mml" element={<MmlTerminal />} />
-          <Route path="/alarms" element={<Alarms />} />
-          <Route path="/metrics" element={<MetricsHistory />} />
           <Route path="/audit" element={<AuditLogs />} />
           <Route path="/tasks" element={<ScheduledTasks />} />
           <Route path="/users" element={<UserManagement />} />
           <Route path="/sites" element={<Sites />} />
           <Route path="/backups" element={<ConfigBackups />} />
           <Route path="/reports" element={<Reports />} />
-          <Route path="/aiops" element={<AIOps />} />
           <Route path="/kb" element={<KnowledgeBase />} />
           <Route path="/kb/:id" element={<KnowledgeBaseDetail />} />
           <Route path="/kb/edit" element={<KnowledgeBaseEdit />} />
