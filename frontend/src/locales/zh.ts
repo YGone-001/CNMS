@@ -13,7 +13,7 @@ const zh = {
     agentManagement: 'Agent 管理',
     metricsHistory: '实时指标',
     alarms: '告警中心',
-    aiops: '故障诊断',
+    faultDiagnosis: '故障诊断',
     faultResolution: '故障处置',
     logCenter: '日志中心',
 

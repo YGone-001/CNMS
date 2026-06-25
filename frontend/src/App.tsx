@@ -9,12 +9,12 @@ import {
   LogOut,
   Activity,
   FileText,
-  Brain,
   PanelLeftClose,
   PanelLeftOpen,
   Search,
   Wifi,
   Lightbulb,
+  Zap,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { MonitorProvider } from '@/context/MonitorContext';
@@ -36,13 +36,13 @@ import Login from './pages/Login';
 import Sites from './pages/Sites';
 import ConfigBackups from './pages/ConfigBackups';
 import Reports from './pages/Reports';
-import AIOps from './pages/AIOps';
 import KnowledgeBase from './pages/KnowledgeBase';
 import KnowledgeBaseDetail from './pages/KnowledgeBaseDetail';
 import KnowledgeBaseEdit from './pages/KnowledgeBaseEdit';
 import AgentManagement from './pages/AgentManagement';
 import FaultResolution from './pages/FaultResolution';
 import LogCenter from './pages/LogCenter';
+import FaultDiagnosis from './pages/FaultDiagnosis';
 
 // Auth helpers
 function getAuthToken(): string | null {
@@ -90,7 +90,7 @@ function useNavItems(): NavItem[] {
     { path: '/agents', label: t('nav.agentManagement'), icon: Wifi },
     { path: '/metrics', label: t('nav.metricsHistory'), icon: Activity },
     { path: '/alarms', label: t('nav.alarms'), icon: Bell, badge: 12 },
-    { path: '/aiops', label: t('nav.aiops'), icon: Brain },
+    { path: '/fault-diagnosis', label: t('nav.faultDiagnosis'), icon: Zap },
     { path: '/fault-resolution', label: t('nav.faultResolution'), icon: Lightbulb },
     { path: '/logs', label: t('nav.logCenter'), icon: FileText },
   ], [t]);
@@ -355,7 +355,7 @@ export default function App() {
           <Route path="/agents" element={<AgentManagement />} />
           <Route path="/metrics" element={<MetricsHistory />} />
           <Route path="/alarms" element={<Alarms />} />
-          <Route path="/aiops" element={<AIOps />} />
+          <Route path="/fault-diagnosis" element={<FaultDiagnosis />} />
           <Route path="/fault-resolution" element={<FaultResolution />} />
           <Route path="/logs" element={<LogCenter />} />
 

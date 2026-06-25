@@ -11,7 +11,7 @@ const en = {
     agentManagement: 'Agent Management',
     metricsHistory: 'Real-time Metrics',
     alarms: 'Alarm Center',
-    aiops: 'Fault Diagnosis',
+    faultDiagnosis: 'Fault Diagnosis',
     faultResolution: 'Fault Resolution',
     logCenter: 'Log Center',
 
