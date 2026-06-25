@@ -4,9 +4,9 @@
 import type { Locale } from './en';
 
 const zh = {
-  // Sidebar navigation - flat 9-item structure
+  // Sidebar navigation - flat structure
   nav: {
-    // Main 9 menu items
+    // Main menu items
     overview: '运维总览',
     topology: '网络拓扑',
     networkElements: '网元管理',
@@ -16,22 +16,24 @@ const zh = {
     faultDiagnosis: '故障诊断',
     faultResolution: '故障处置',
     logCenter: '日志中心',
+    configBackups: '配置备份',
+    scheduledTasks: '自动化任务',
+    knowledgeBase: '知识库',
+    reports: '报表中心',
+    systemSettings: '系统管理',
+    apiDocs: 'API 文档',
 
     // Legacy items (kept for backward compatibility)
     dashboards: '仪表盘',
     faultPerf: '告警与性能',
-    reports: '报表分析',
     opsMaint: '运维管理',
     subscribers: '订户管理',
     mmlTerminal: 'MML 终端',
-    configBackups: '配置备份',
     cronTasks: '定时任务',
-    knowledgeBase: '知识库',
     sysAdmin: '系统管理',
     auditLogs: '审计日志',
     userManagement: '用户管理',
     siteSettings: '站点管理',
-    apiDocs: 'API 文档',
   },
 
   // Sidebar common

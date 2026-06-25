@@ -15,6 +15,12 @@ import {
   Wifi,
   Lightbulb,
   Zap,
+  Database,
+  Clock,
+  Library,
+  BarChart3,
+  Settings,
+  BookOpen,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { MonitorProvider } from '@/context/MonitorContext';
@@ -93,6 +99,12 @@ function useNavItems(): NavItem[] {
     { path: '/fault-diagnosis', label: t('nav.faultDiagnosis'), icon: Zap },
     { path: '/fault-resolution', label: t('nav.faultResolution'), icon: Lightbulb },
     { path: '/logs', label: t('nav.logCenter'), icon: FileText },
+    { path: '/backups', label: t('nav.configBackups'), icon: Database },
+    { path: '/tasks', label: t('nav.scheduledTasks'), icon: Clock },
+    { path: '/kb', label: t('nav.knowledgeBase'), icon: Library },
+    { path: '/reports', label: t('nav.reports'), icon: BarChart3 },
+    { path: '/settings', label: t('nav.systemSettings'), icon: Settings },
+    { path: '/docs', label: t('nav.apiDocs'), icon: BookOpen },
   ], [t]);
 }
 
@@ -348,7 +360,7 @@ export default function App() {
     <HashRouter>
       <Routes>
         <Route element={<AppLayout onLogout={handleLogout} />}>
-          {/* Main 9 menu items */}
+          {/* Main menu items */}
           <Route path="/" element={<Overview />} />
           <Route path="/topology" element={<Topology />} />
           <Route path="/elements" element={<NetworkElements />} />
@@ -358,21 +370,22 @@ export default function App() {
           <Route path="/fault-diagnosis" element={<FaultDiagnosis />} />
           <Route path="/fault-resolution" element={<FaultResolution />} />
           <Route path="/logs" element={<LogCenter />} />
+          <Route path="/backups" element={<ConfigBackups />} />
+          <Route path="/tasks" element={<ScheduledTasks />} />
+          <Route path="/kb" element={<KnowledgeBase />} />
+          <Route path="/kb/:id" element={<KnowledgeBaseDetail />} />
+          <Route path="/kb/edit" element={<KnowledgeBaseEdit />} />
+          <Route path="/kb/edit/:id" element={<KnowledgeBaseEdit />} />
+          <Route path="/reports" element={<Reports />} />
+          <Route path="/settings" element={<Sites />} />
+          <Route path="/docs" element={<ApiDocs />} />
 
           {/* Legacy routes (keep for backward compatibility) */}
           <Route path="/subscribers" element={<Subscribers />} />
           <Route path="/mml" element={<MmlTerminal />} />
           <Route path="/audit" element={<AuditLogs />} />
-          <Route path="/tasks" element={<ScheduledTasks />} />
           <Route path="/users" element={<UserManagement />} />
           <Route path="/sites" element={<Sites />} />
-          <Route path="/backups" element={<ConfigBackups />} />
-          <Route path="/reports" element={<Reports />} />
-          <Route path="/kb" element={<KnowledgeBase />} />
-          <Route path="/kb/:id" element={<KnowledgeBaseDetail />} />
-          <Route path="/kb/edit" element={<KnowledgeBaseEdit />} />
-          <Route path="/kb/edit/:id" element={<KnowledgeBaseEdit />} />
-          <Route path="/docs" element={<ApiDocs />} />
         </Route>
       </Routes>
     </HashRouter>
