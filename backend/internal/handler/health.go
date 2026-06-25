@@ -8,6 +8,38 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
+// 应用启动时间（用于健康检查）
+var startTime = time.Now()
+
+// Health 返回应用健康状态（用于 /api/health 端点）
+func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]interface{}{
+			"status":  "error",
+			"message": "method not allowed",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+
+	// 检查 MongoDB 连接
+	mongoStatus := "ok"
+	if err := h.Mongo.Ping(ctx); err != nil {
+		mongoStatus = "error"
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":    "ok",
+		"version":   "1.4.1",
+		"uptime":    time.Since(startTime).String(),
+		"components": map[string]interface{}{
+			"mongodb": mongoStatus,
+		},
+	})
+}
+
 // GetInterfaceHealth 返回 NF 接口健康状态
 func (h *Handler) GetInterfaceHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {

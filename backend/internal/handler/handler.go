@@ -109,12 +109,6 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, LoginResponse{Status: "ok", Message: "login successful", Token: token})
 }
 
-// Health 健康检查接口，返回 {"status": "ok"}
-func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-}
-
 // mmlRequest MML 执行请求体
 type mmlRequest struct {
 	Command string `json:"command"`
@@ -890,4 +884,21 @@ func (h *Handler) writeAuditLog(r *http.Request, action, resource, detail string
 
 	coll := h.Mongo.Database.Collection("audit_logs")
 	coll.InsertOne(ctx, entry)
+}
+
+// CheckReadiness 检查应用就绪状态（用于 /readyz 端点）
+func (h *Handler) CheckReadiness() error {
+	if h.Mongo == nil {
+		return fmt.Errorf("MongoDB client not initialized")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// 执行 ping 命令检查 MongoDB 连接
+	if err := h.Mongo.Ping(ctx); err != nil {
+		return fmt.Errorf("MongoDB ping failed: %w", err)
+	}
+
+	return nil
 }

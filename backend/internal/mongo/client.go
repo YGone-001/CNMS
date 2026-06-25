@@ -40,3 +40,8 @@ func Connect(ctx context.Context, uri, dbName string) (*Client, error) {
 func (c *Client) Close(ctx context.Context) error {
 	return c.cli.Disconnect(ctx)
 }
+
+// Ping 检查 MongoDB 连接状态
+func (c *Client) Ping(ctx context.Context) error {
+	return c.cli.Ping(ctx, readpref.Primary())
+}

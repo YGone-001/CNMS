@@ -1,9 +1,11 @@
 package router
 
 import (
+	"encoding/json"
 	"io/fs"
 	"net/http"
 	"strings"
+	"time"
 
 	"xcloud-cnms/internal/auth"
 	"xcloud-cnms/internal/handler"
@@ -11,17 +13,21 @@ import (
 	"xcloud-cnms/internal/ws"
 )
 
+// 应用启动时间（用于健康检查）
+var startTime = time.Now()
+
 // spaHandler 实现 SPA Fallback：
 // 请求的文件存在则返回该文件，否则返回 index.html
 type spaHandler struct {
-	fs     fs.FS
-	prefix string // 嵌入文件系统中的路径前缀，如 "public/dist"
+	fs fs.FS
 }
 
 func (s *spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// 清理路径，去掉开头的 "/"
+	// 清理路径
 	path := strings.TrimPrefix(r.URL.Path, "/")
-	if path == "" {
+
+	// 根路径直接返回 index.html
+	if path == "" || path == "/" {
 		path = "index.html"
 	}
 
@@ -31,6 +37,11 @@ func (s *spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		defer f.Close()
 		// 检查是否为目录，目录也回退到 index.html
 		if stat, err := f.Stat(); err == nil && !stat.IsDir() {
+			// 设置正确的 Content-Type
+			ext := getExt(path)
+			if contentType, ok := mimeTypes[ext]; ok {
+				w.Header().Set("Content-Type", contentType)
+			}
 			http.FileServer(http.FS(s.fs)).ServeHTTP(w, r)
 			return
 		}
@@ -41,6 +52,34 @@ func (s *spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.FileServer(http.FS(s.fs)).ServeHTTP(w, r)
 }
 
+// MIME 类型映射
+var mimeTypes = map[string]string{
+	".html": "text/html; charset=utf-8",
+	".css":  "text/css; charset=utf-8",
+	".js":   "application/javascript; charset=utf-8",
+	".json": "application/json; charset=utf-8",
+	".svg":  "image/svg+xml",
+	".png":  "image/png",
+	".jpg":  "image/jpeg",
+	".gif":  "image/gif",
+	".ico":  "image/x-icon",
+	".woff": "font/woff",
+	".woff2": "font/woff2",
+	".ttf":  "font/ttf",
+}
+
+func getExt(path string) string {
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] == '.' {
+			return path[i:]
+		}
+		if path[i] == '/' {
+			return ""
+		}
+	}
+	return ""
+}
+
 // New 创建并返回路由注册完成的 http.ServeMux
 // staticFS 为嵌入的前端 dist 文件系统（已通过 fs.Sub 剥离前缀），传 nil 时跳过静态托管
 func New(h *handler.Handler, wh *ws.WSHandler, lsh *ws.LogStreamHandler, dh *handler.DiscoveryHandler, staticFS fs.FS) *http.ServeMux {
@@ -49,6 +88,33 @@ func New(h *handler.Handler, wh *ws.WSHandler, lsh *ws.LogStreamHandler, dh *han
 	// RBAC 中间件定义
 	requireAdmin := auth.RequireRole("admin")
 	requireOperator := auth.RequireRole("admin", "operator")
+
+	// 健康检查端点（不需要认证，供运维和监控使用）
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": "ok",
+		})
+	})
+
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		// 检查 MongoDB 连接状态
+		if err := h.CheckReadiness(); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"status": "not_ready",
+				"error":  err.Error(),
+			})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": "ready",
+		})
+	})
 
 	// 登录接口（不需要认证）
 	mux.HandleFunc("/api/v1/auth/login", h.Login)
@@ -219,6 +285,8 @@ func New(h *handler.Handler, wh *ws.WSHandler, lsh *ws.LogStreamHandler, dh *han
 	if staticFS != nil {
 		mux.Handle("/", &spaHandler{fs: staticFS})
 	}
+
+	// 根路径也由 spaHandler 处理（确保 / 返回 index.html）
 
 	return mux
 }
