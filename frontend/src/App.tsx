@@ -21,6 +21,7 @@ import {
   BarChart3,
   Settings,
   BookOpen,
+  Users,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { MonitorProvider } from '@/context/MonitorContext';
@@ -32,6 +33,7 @@ import NetworkElements from './pages/NetworkElements';
 import MmlTerminal from './pages/MmlTerminal';
 import Subscribers from './pages/Subscribers';
 import AlarmCenter from './pages/AlarmCenter';
+import UEInfoPage from './pages/UEInfo';
 import Topology from './pages/Topology';
 import MetricsHistory from './pages/MetricsHistory';
 import AuditLogs from './pages/AuditLogs';
@@ -94,6 +96,7 @@ function useNavItems(): NavItem[] {
     { path: '/topology', label: t('nav.topology'), icon: Network },
     { path: '/elements', label: t('nav.networkElements'), icon: Server },
     { path: '/agents', label: t('nav.agentManagement'), icon: Wifi },
+    { path: '/ue-info', label: t('nav.ueInfo'), icon: Users },
     { path: '/metrics', label: t('nav.metricsHistory'), icon: Activity },
     { path: '/alarms', label: t('nav.alarms'), icon: Bell, badge: 12 },
     { path: '/fault-diagnosis', label: t('nav.faultDiagnosis'), icon: Zap },
@@ -365,6 +368,7 @@ export default function App() {
           <Route path="/topology" element={<Topology />} />
           <Route path="/elements" element={<NetworkElements />} />
           <Route path="/agents" element={<AgentManagement />} />
+          <Route path="/ue-info" element={<UEInfoPage />} />
           <Route path="/metrics" element={<MetricsHistory />} />
           <Route path="/alarms" element={<AlarmCenter />} />
           <Route path="/fault-diagnosis" element={<FaultDiagnosis />} />

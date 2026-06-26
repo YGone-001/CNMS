@@ -9,6 +9,7 @@ const en = {
     topology: 'Network Topology',
     networkElements: 'Network Elements',
     agentManagement: 'Agent Management',
+    ueInfo: 'UE Info',
     metricsHistory: 'Real-time Metrics',
     alarms: 'Alarm Center',
     faultDiagnosis: 'Fault Diagnosis',

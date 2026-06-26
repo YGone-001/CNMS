@@ -202,6 +202,12 @@ func New(h *handler.Handler, wh *ws.WSHandler, lsh *ws.LogStreamHandler, dh *han
 		// 电信 KPI
 		case r.URL.Path == "/api/v1/telecom-kpi":
 			h.GetTelecomKPI(w, r)
+		// 业务指标
+		case r.URL.Path == "/api/v1/business-metrics":
+			h.GetBusinessMetrics(w, r)
+		// UE 信息
+		case r.URL.Path == "/api/v1/ue-info":
+			h.GetUEInfo(w, r)
 		// P3: 站点管理
 		case r.URL.Path == "/api/v1/sites" && r.Method == http.MethodGet:
 			h.GetSites(w, r)

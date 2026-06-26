@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -24,15 +25,27 @@ import (
 
 // Handler 持有 HTTP 处理器的依赖
 type Handler struct {
-	Mongo     *mongo.Client
-	LogDir    string
-	Auth      config.AuthConfig
-	UploadDir string // 知识库文件上传目录
+	Mongo      *mongo.Client
+	MySQLDB    *sql.DB
+	SCSCFDB    *sql.DB
+	LogDir     string
+	Auth       config.AuthConfig
+	UploadDir  string // 知识库文件上传目录
 }
 
 // New 创建 Handler 实例
 func New(mc *mongo.Client, logDir string, authCfg config.AuthConfig) *Handler {
 	return &Handler{Mongo: mc, LogDir: logDir, Auth: authCfg, UploadDir: "uploads/kb"}
+}
+
+// NewWithMySQL 创建带 MySQL 的 Handler 实例
+func NewWithMySQL(mc *mongo.Client, mysqlDB *sql.DB, logDir string, authCfg config.AuthConfig) *Handler {
+	return &Handler{Mongo: mc, MySQLDB: mysqlDB, LogDir: logDir, Auth: authCfg, UploadDir: "uploads/kb"}
+}
+
+// NewWithAllDB 创建带所有数据库的 Handler 实例
+func NewWithAllDB(mc *mongo.Client, mysqlDB *sql.DB, scscfDB *sql.DB, logDir string, authCfg config.AuthConfig) *Handler {
+	return &Handler{Mongo: mc, MySQLDB: mysqlDB, SCSCFDB: scscfDB, LogDir: logDir, Auth: authCfg, UploadDir: "uploads/kb"}
 }
 
 // LoginRequest 登录请求

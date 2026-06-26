@@ -16,6 +16,11 @@ type Client struct {
 	Database *mongo.Database
 }
 
+// GetClient 获取底层的 mongo.Client
+func (c *Client) GetClient() *mongo.Client {
+	return c.cli
+}
+
 // Connect 建立 MongoDB 连接，uri 为连接串，dbName 为目标数据库名
 func Connect(ctx context.Context, uri, dbName string) (*Client, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)

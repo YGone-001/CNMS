@@ -11,6 +11,7 @@ const zh = {
     topology: '网络拓扑',
     networkElements: '网元管理',
     agentManagement: 'Agent 管理',
+    ueInfo: 'UE 信息',
     metricsHistory: '实时指标',
     alarms: '告警中心',
     faultDiagnosis: '故障诊断',

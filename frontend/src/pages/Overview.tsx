@@ -11,6 +11,9 @@ import {
   Settings,
   RefreshCw,
   ChevronDown,
+  Users,
+  Phone,
+  TrendingUp,
 } from 'lucide-react';
 import SummaryCard from '@/components/SummaryCard';
 import ResourceChart from '@/components/ResourceChart';
@@ -18,9 +21,20 @@ import { formatBytes, formatPercent } from '@/utils/format';
 import { authFetch } from '@/App';
 import type { SystemStatusEnhanced, DeploymentTemplate } from '@/types/monitor';
 
+// 业务指标类型
+interface BusinessMetrics {
+  epc_online_users: number;    // EPC/5GC 在线用户数
+  ims_online_users: number;    // IMS 在线用户数
+  total_subscribers: number;   // 总订户数（EPC/5GC）
+  total_ims_users: number;     // 总 IMS 用户数
+  active_calls: number;        // 并发呼叫数
+  sip_reg_success_rate: number; // SIP 注册成功率
+}
+
 // 概览仪表盘页面
 export default function Overview() {
   const [deploymentStatus, setDeploymentStatus] = useState<SystemStatusEnhanced | null>(null);
+  const [businessMetrics, setBusinessMetrics] = useState<BusinessMetrics | null>(null);
   const [templates, setTemplates] = useState<DeploymentTemplate[]>([]);
   const [currentTemplate, setCurrentTemplate] = useState<string>('auto');
   const [loading, setLoading] = useState(true);
@@ -90,13 +104,30 @@ export default function Overview() {
     }
   }, [fetchDeploymentStatus]);
 
+  // 获取业务指标
+  const fetchBusinessMetrics = useCallback(async () => {
+    try {
+      const response = await authFetch('/api/v1/business-metrics');
+      const data = await response.json();
+      if (data.status === 'ok') {
+        setBusinessMetrics(data.data);
+      }
+    } catch (err) {
+      console.error('Error fetching business metrics:', err);
+    }
+  }, []);
+
   useEffect(() => {
     fetchTemplates();
     fetchDeploymentStatus();
+    fetchBusinessMetrics();
     // 每 30 秒刷新一次
-    const interval = setInterval(fetchDeploymentStatus, 30000);
+    const interval = setInterval(() => {
+      fetchDeploymentStatus();
+      fetchBusinessMetrics();
+    }, 30000);
     return () => clearInterval(interval);
-  }, [fetchTemplates, fetchDeploymentStatus]);
+  }, [fetchTemplates, fetchDeploymentStatus, fetchBusinessMetrics]);
 
   // 点击外部关闭菜单
   useEffect(() => {
@@ -211,7 +242,39 @@ export default function Overview() {
 
   return (
     <div className="space-y-6">
-      {/* 汇总卡片行 */}
+      {/* 业务指标卡片 */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <SummaryCard
+          title="EPC/5GC 在线用户"
+          value={businessMetrics?.epc_online_users ?? 0}
+          icon={Users}
+          accentColor="text-blue-400"
+          subtitle={`总订户: ${businessMetrics?.total_subscribers ?? 0}`}
+        />
+        <SummaryCard
+          title="IMS 在线用户"
+          value={businessMetrics?.ims_online_users ?? 0}
+          icon={Users}
+          accentColor="text-emerald-400"
+          subtitle={`总用户: ${businessMetrics?.total_ims_users ?? 0}`}
+        />
+        <SummaryCard
+          title="并发呼叫数"
+          value={businessMetrics?.active_calls ?? 0}
+          icon={Phone}
+          accentColor="text-amber-400"
+          subtitle="当前活跃呼叫"
+        />
+        <SummaryCard
+          title="SIP 注册成功率"
+          value={`${(businessMetrics?.sip_reg_success_rate ?? 100).toFixed(1)}%`}
+          icon={TrendingUp}
+          accentColor="text-purple-400"
+          subtitle="注册成功/总数"
+        />
+      </div>
+
+      {/* 系统状态卡片 */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <SummaryCard
           title="运行中"

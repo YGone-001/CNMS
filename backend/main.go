@@ -19,6 +19,7 @@ import (
 	"xcloud-cnms/internal/scheduler"
 	"xcloud-cnms/internal/ws"
 
+	_ "github.com/go-sql-driver/mysql"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	mongoDrv "go.mongodb.org/mongo-driver/v2/mongo"
 )
@@ -74,12 +75,30 @@ func main() {
 		log.Fatalf("embed sub filesystem: %v", err)
 	}
 
+	// 初始化 MySQL 连接（IMS HSS）
+	mysqlDB, err := handler.InitMySQLDB()
+	if err != nil {
+		log.Printf("warning: failed to connect to MySQL HSS: %v", err)
+	} else {
+		log.Println("mysql connected: hss_db")
+		defer mysqlDB.Close()
+	}
+
+	// 初始化 S-CSCF MySQL 连接
+	scscfDB, err := handler.InitSCSCFMySQLDB()
+	if err != nil {
+		log.Printf("warning: failed to connect to MySQL S-CSCF: %v", err)
+	} else {
+		log.Println("mysql connected: scscf")
+		defer scscfDB.Close()
+	}
+
 	// 初始化 JWT 密钥
 	if cfg.Auth.JWTKey != "" {
 		auth.SetSecret(cfg.Auth.JWTKey)
 	}
 
-	h := handler.New(mc, cfg.LogDir, cfg.Auth)
+	h := handler.NewWithAllDB(mc, mysqlDB, scscfDB, cfg.LogDir, cfg.Auth)
 	wh := ws.NewWSHandler(mc, cfg.Notify.WebhookURL, cfg.Notify.MinLevel, cfg.Auth.Enabled)
 	lsh := ws.NewLogStreamHandler(cfg.LogDir, cfg.Auth.Enabled)
 
