@@ -31,7 +31,7 @@ import Overview from './pages/Overview';
 import NetworkElements from './pages/NetworkElements';
 import MmlTerminal from './pages/MmlTerminal';
 import Subscribers from './pages/Subscribers';
-import Alarms from './pages/Alarms';
+import AlarmCenter from './pages/AlarmCenter';
 import Topology from './pages/Topology';
 import MetricsHistory from './pages/MetricsHistory';
 import AuditLogs from './pages/AuditLogs';
@@ -366,7 +366,7 @@ export default function App() {
           <Route path="/elements" element={<NetworkElements />} />
           <Route path="/agents" element={<AgentManagement />} />
           <Route path="/metrics" element={<MetricsHistory />} />
-          <Route path="/alarms" element={<Alarms />} />
+          <Route path="/alarms" element={<AlarmCenter />} />
           <Route path="/fault-diagnosis" element={<FaultDiagnosis />} />
           <Route path="/fault-resolution" element={<FaultResolution />} />
           <Route path="/logs" element={<LogCenter />} />
