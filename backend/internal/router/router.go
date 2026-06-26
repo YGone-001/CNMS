@@ -245,6 +245,15 @@ func New(h *handler.Handler, wh *ws.WSHandler, lsh *ws.LogStreamHandler, dh *han
 			h.GetTrends(w, r)
 		case r.URL.Path == "/api/v1/aiops/summary":
 			h.GetAIOpsSummary(w, r)
+		// P6: 部署模板管理
+		case r.URL.Path == "/api/v1/deployment/templates":
+			h.GetDeploymentTemplates(w, r)
+		case r.URL.Path == "/api/v1/deployment/status":
+			h.GetDeploymentStatus(w, r)
+		case r.URL.Path == "/api/v1/deployment/template" && r.Method == http.MethodPost:
+			h.SetDeploymentTemplate(w, r)
+		case r.URL.Path == "/api/v1/deployment/component":
+			h.GetComponentStatus(w, r)
 		// P5: 知识库管理
 		case r.URL.Path == "/api/v1/solutions" && r.Method == http.MethodGet:
 			h.GetSolutions(w, r)

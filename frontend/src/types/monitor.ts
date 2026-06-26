@@ -9,6 +9,57 @@ export interface ProcessStatus {
   running: boolean;
 }
 
+// 进程状态枚举
+export type ProcessState = 'running' | 'stopped' | 'disabled' | 'not_installed' | 'expected_missing';
+
+// 增强版进程状态
+export interface ProcessStatusEnhanced {
+  name: string;
+  pid: number;
+  cpu_percent: number;
+  memory_rss: number;
+  memory_vms: number;
+  memory_percent: number;
+  state: ProcessState;
+  category: string;
+  description: string;
+  required: boolean;
+}
+
+// 状态摘要
+export interface StatusSummary {
+  total: number;
+  running: number;
+  stopped: number;
+  disabled: number;
+  not_installed: number;
+  expected_missing: number;
+}
+
+// 增强版系统状态
+export interface SystemStatusEnhanced {
+  timestamp: number;
+  processes: ProcessStatusEnhanced[];
+  template: string;
+  summary: StatusSummary;
+}
+
+// 部署模板
+export interface DeploymentTemplate {
+  name: string;
+  description: string;
+  components: ComponentConfig[];
+}
+
+// 组件配置
+export interface ComponentConfig {
+  name: string;
+  required: boolean;
+  enabled: boolean;
+  category: string;
+  desc: string;
+}
+
 // WebSocket 推送的完整数据结构 (与后端 monitor.SystemStatus 一致)
 export interface MonitorSnapshot {
   timestamp: number;
