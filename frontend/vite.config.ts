@@ -30,14 +30,23 @@ export default defineConfig({
       '/api/v1/monitor/ws': {
         target: 'ws://localhost:8088',
         ws: true,
+        configure: (proxy) => {
+          proxy.on('error', () => {});
+        },
       },
       '/api/v1/nf/logs/ws': {
         target: 'ws://localhost:8088',
         ws: true,
+        configure: (proxy) => {
+          proxy.on('error', () => {});
+        },
       },
       '/api/v1/deployment/ws': {
         target: 'ws://localhost:8088',
         ws: true,
+        configure: (proxy) => {
+          proxy.on('error', () => {});
+        },
       },
     },
   },
