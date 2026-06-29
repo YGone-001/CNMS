@@ -1,8 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Server,
-  Cpu,
-  MemoryStick,
   CheckCircle,
   XCircle,
   Pause,
@@ -12,13 +10,14 @@ import {
   RefreshCw,
   ChevronDown,
   Users,
-  Phone,
-  TrendingUp,
+  RotateCcw,
+  FileText,
+  Terminal,
 } from 'lucide-react';
 import SummaryCard from '@/components/SummaryCard';
-import ResourceChart from '@/components/ResourceChart';
 import { formatBytes, formatPercent } from '@/utils/format';
 import { authFetch } from '@/App';
+import { useMonitor } from '@/context/MonitorContext';
 import type { SystemStatusEnhanced, DeploymentTemplate } from '@/types/monitor';
 
 // 业务指标类型
@@ -33,14 +32,22 @@ interface BusinessMetrics {
 
 // 概览仪表盘页面
 export default function Overview() {
+  // 使用统一 WebSocket 获取实时数据
+  const {
+    wsStatus,
+    deploymentStatus: wsDeploymentStatus,
+    businessMetrics: wsBusinessMetrics,
+  } = useMonitor();
+
   const [deploymentStatus, setDeploymentStatus] = useState<SystemStatusEnhanced | null>(null);
   const [businessMetrics, setBusinessMetrics] = useState<BusinessMetrics | null>(null);
   const [templates, setTemplates] = useState<DeploymentTemplate[]>([]);
   const [currentTemplate, setCurrentTemplate] = useState<string>('auto');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showTemplateMenu, setShowTemplateMenu] = useState(false);
-  const [chartKey, setChartKey] = useState<number>(0); // 用于强制重新创建图表组件
+  const [statusFilter, setStatusFilter] = useState<string | null>(null); // 状态过滤条件
+  const [criticalAlarms, setCriticalAlarms] = useState<Array<{id: string; source: string; message: string; timestamp: string}>>([]);
 
   // 获取部署模板列表
   const fetchTemplates = useCallback(async () => {
@@ -55,18 +62,51 @@ export default function Overview() {
     }
   }, []);
 
-  // 获取部署状态
+  // 获取 Critical 告警（从部署状态中提取所有已停止的组件）
+  const updateCriticalAlarms = useCallback((status: SystemStatusEnhanced | null) => {
+    if (status?.processes) {
+      // 获取所有已停止的组件（包括必需和非必需）
+      const stoppedProcesses = status.processes.filter(
+        (p) => p.state === 'stopped'
+      );
+      const alarms = stoppedProcesses.map((p) => ({
+        id: `critical-${p.name}`,
+        source: p.name,
+        message: `${p.name} 进程停止运行 - ${p.description}`,
+        timestamp: new Date().toISOString(),
+      }));
+      setCriticalAlarms(alarms);
+    }
+  }, []);
+
+  // WebSocket 数据同步
+  useEffect(() => {
+    if (wsDeploymentStatus) {
+      setDeploymentStatus(wsDeploymentStatus);
+      setCurrentTemplate(wsDeploymentStatus.template || 'auto');
+      updateCriticalAlarms(wsDeploymentStatus);
+    }
+  }, [wsDeploymentStatus, updateCriticalAlarms]);
+
+  useEffect(() => {
+    if (wsBusinessMetrics) {
+      setBusinessMetrics(wsBusinessMetrics);
+    }
+  }, [wsBusinessMetrics]);
+
+  // HTTP 轮询作为备用（当 WebSocket 断开时）
   const fetchDeploymentStatus = useCallback(async () => {
+    if (wsStatus === 'CONNECTED') return; // WebSocket 已连接，跳过 HTTP 轮询
+
     setLoading(true);
     setError(null);
     try {
       const response = await authFetch('/api/v1/deployment/status');
       const data = await response.json();
-      console.log('Deployment status response:', data);
       if (data.status === 'ok') {
         setDeploymentStatus(data.data);
         setCurrentTemplate(data.data.template || 'auto');
-        console.log('Current template set to:', data.data.template);
+        updateCriticalAlarms(data.data);
       } else {
         setError(data.message || 'Failed to fetch deployment status');
       }
@@ -76,7 +116,7 @@ export default function Overview() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [updateCriticalAlarms, wsStatus]);
 
   // 切换部署模板
   const switchTemplate = useCallback(async (templateName: string) => {
@@ -92,8 +132,6 @@ export default function Overview() {
       if (data.status === 'ok') {
         setCurrentTemplate(templateName);
         setShowTemplateMenu(false);
-        // 清空图表历史数据
-        setChartKey((prev) => prev + 1);
         // 重新获取状态
         await fetchDeploymentStatus();
       } else {
@@ -117,17 +155,26 @@ export default function Overview() {
     }
   }, []);
 
+  // 初始化：获取模板列表和初始数据
   useEffect(() => {
     fetchTemplates();
-    fetchDeploymentStatus();
-    fetchBusinessMetrics();
-    // 每 30 秒刷新一次
+    // 仅在 WebSocket 未连接时使用 HTTP 轮询
+    if (wsStatus !== 'CONNECTED') {
+      fetchDeploymentStatus();
+      fetchBusinessMetrics();
+    }
+  }, [fetchTemplates, fetchDeploymentStatus, fetchBusinessMetrics, wsStatus]);
+
+  // 备用轮询：当 WebSocket 断开时，每 30 秒轮询一次
+  useEffect(() => {
+    if (wsStatus === 'CONNECTED') return; // WebSocket 已连接，跳过轮询
+
     const interval = setInterval(() => {
       fetchDeploymentStatus();
       fetchBusinessMetrics();
     }, 30000);
     return () => clearInterval(interval);
-  }, [fetchTemplates, fetchDeploymentStatus, fetchBusinessMetrics]);
+  }, [fetchDeploymentStatus, fetchBusinessMetrics, wsStatus]);
 
   // 点击外部关闭菜单
   useEffect(() => {
@@ -149,11 +196,6 @@ export default function Overview() {
 
   const summary = deploymentStatus?.summary;
   const processes = deploymentStatus?.processes ?? [];
-
-  // 计算运行中的进程资源使用
-  const runningProcesses = processes.filter((p) => p.state === 'running');
-  const totalCpu = runningProcesses.reduce((sum, p) => sum + p.cpu_percent, 0);
-  const totalMemoryRss = runningProcesses.reduce((sum, p) => sum + p.memory_rss, 0);
 
   // 获取当前模板描述
   const currentTemplateDesc = templates.find((t) => t.name === currentTemplate)?.description || currentTemplate;
@@ -242,73 +284,40 @@ export default function Overview() {
 
   return (
     <div className="space-y-6">
-      {/* 业务指标卡片 */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <SummaryCard
-          title="EPC/5GC 在线用户"
-          value={businessMetrics?.epc_online_users ?? 0}
-          icon={Users}
-          accentColor="text-blue-400"
-          subtitle={`总订户: ${businessMetrics?.total_subscribers ?? 0}`}
-        />
-        <SummaryCard
-          title="IMS 在线用户"
-          value={businessMetrics?.ims_online_users ?? 0}
-          icon={Users}
-          accentColor="text-emerald-400"
-          subtitle={`总用户: ${businessMetrics?.total_ims_users ?? 0}`}
-        />
-        <SummaryCard
-          title="并发呼叫数"
-          value={businessMetrics?.active_calls ?? 0}
-          icon={Phone}
-          accentColor="text-amber-400"
-          subtitle="当前活跃呼叫"
-        />
-        <SummaryCard
-          title="SIP 注册成功率"
-          value={`${(businessMetrics?.sip_reg_success_rate ?? 100).toFixed(1)}%`}
-          icon={TrendingUp}
-          accentColor="text-purple-400"
-          subtitle="注册成功/总数"
-        />
-      </div>
-
-      {/* 系统状态卡片 */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-        <SummaryCard
-          title="运行中"
-          value={summary?.running ?? 0}
-          icon={CheckCircle}
-          accentColor="text-emerald-400"
-        />
-        <SummaryCard
-          title="已停止"
-          value={summary?.stopped ?? 0}
-          icon={XCircle}
-          accentColor="text-red-400"
-        />
-        <SummaryCard
-          title="已禁用/预期缺失"
-          value={(summary?.disabled ?? 0) + (summary?.expected_missing ?? 0)}
-          icon={Pause}
-          accentColor="text-gray-400"
-        />
-        <SummaryCard
-          title="Total CPU"
-          value={formatPercent(totalCpu, 1)}
-          icon={Cpu}
-          accentColor="text-noc-accent"
-          subtitle="across running processes"
-        />
-        <SummaryCard
-          title="Total Memory"
-          value={formatBytes(totalMemoryRss)}
-          icon={MemoryStick}
-          accentColor="text-noc-warning"
-          subtitle="RSS across running processes"
-        />
-      </div>
+      {/* Critical 告警横幅 */}
+      {criticalAlarms.length > 0 && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4">
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="w-5 h-5 text-red-400 animate-pulse flex-shrink-0" />
+            <div className="flex-1 overflow-hidden">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-red-400">致命告警</span>
+                <span className="px-2 py-0.5 bg-red-500/20 text-red-400 text-xs rounded-full">
+                  {criticalAlarms.length}
+                </span>
+              </div>
+              <div className="mt-1 overflow-hidden">
+                <div className="animate-marquee whitespace-nowrap">
+                  {criticalAlarms.map((alarm, index) => (
+                    <span key={alarm.id} className="text-sm text-red-300">
+                      {alarm.message}
+                      {index < criticalAlarms.length - 1 && (
+                        <span className="mx-4 text-red-500">•</span>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={() => window.location.hash = '#/alarms'}
+              className="flex-shrink-0 px-3 py-1.5 bg-red-500/20 text-red-400 text-sm rounded-lg hover:bg-red-500/30 transition-colors"
+            >
+              查看详情
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 部署模板选择 */}
       <div className="bg-noc-surface border border-noc-border rounded-lg p-4">
@@ -363,6 +372,24 @@ export default function Overview() {
         </div>
       </div>
 
+      {/* 业务指标卡片 */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <SummaryCard
+          title="EPC/5GC 在线用户"
+          value={businessMetrics?.epc_online_users ?? 0}
+          icon={Users}
+          accentColor="text-blue-400"
+          subtitle={`总订户: ${businessMetrics?.total_subscribers ?? 0}`}
+        />
+        <SummaryCard
+          title="IMS 在线用户"
+          value={businessMetrics?.ims_online_users ?? 0}
+          icon={Users}
+          accentColor="text-emerald-400"
+          subtitle={`总用户: ${businessMetrics?.total_ims_users ?? 0}`}
+        />
+      </div>
+
       {/* 状态分布 */}
       <div className="bg-noc-surface border border-noc-border rounded-lg p-6">
         <h3 className="text-base font-semibold text-noc-text mb-4">组件状态分布</h3>
@@ -376,8 +403,11 @@ export default function Overview() {
           ].map((item) => (
             <div
               key={item.state}
-              className={`p-4 rounded-lg border ${
-                item.count > 0
+              onClick={() => setStatusFilter(statusFilter === item.state ? null : item.state)}
+              className={`p-4 rounded-lg border cursor-pointer transition-all ${
+                statusFilter === item.state
+                  ? `ring-2 ring-${item.color}-400`
+                  : item.count > 0
                   ? `bg-${item.color}-500/5 border-${item.color}-500/20`
                   : 'bg-noc-bg border-noc-border'
               }`}
@@ -392,26 +422,25 @@ export default function Overview() {
         </div>
       </div>
 
-      {/* 资源趋势图 */}
-      {runningProcesses.length > 0 && (
-        <ResourceChart
-          key={chartKey}
-          processes={runningProcesses.map((p) => ({
-            name: p.name,
-            pid: p.pid,
-            cpu_percent: p.cpu_percent,
-            memory_rss: p.memory_rss,
-            memory_vms: p.memory_vms,
-            memory_percent: p.memory_percent,
-            running: true,
-          }))}
-        />
-      )}
-
       {/* 网元状态列表 */}
       <div>
-        <div className="text-sm font-medium text-noc-warning mb-3">
-          网元状态详情
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-sm font-medium text-noc-warning">
+            网元状态详情
+            {statusFilter && (
+              <span className="ml-2 text-xs text-noc-muted">
+                (已过滤: {statusFilter === 'running' ? '运行中' : statusFilter === 'stopped' ? '已停止' : '已禁用'})
+              </span>
+            )}
+          </div>
+          {statusFilter && (
+            <button
+              onClick={() => setStatusFilter(null)}
+              className="text-xs text-noc-accent hover:underline"
+            >
+              清除过滤
+            </button>
+          )}
         </div>
         {processes.length > 0 ? (
           <div className="bg-noc-surface border border-noc-border rounded-lg overflow-hidden">
@@ -437,11 +466,19 @@ export default function Overview() {
                     <th className="text-left px-6 py-3 text-xs font-medium text-noc-muted uppercase tracking-wider">
                       描述
                     </th>
+                    <th className="text-right px-6 py-3 text-xs font-medium text-noc-muted uppercase tracking-wider">
+                      操作
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-noc-border">
-                  {processes.map((proc) => (
-                    <tr key={proc.name} className="hover:bg-noc-bg-50 transition-colors">
+                  {processes
+                    .filter((proc) => {
+                      if (!statusFilter) return true;
+                      return proc.state === statusFilter;
+                    })
+                    .map((proc) => (
+                    <tr key={proc.name} className="group hover:bg-noc-bg-50 transition-colors">
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
                           <Server className="w-4 h-4 text-noc-muted" />
@@ -459,7 +496,18 @@ export default function Overview() {
                             proc.state
                           )}`}
                         >
-                          {getStateIcon(proc.state)}
+                          <span className={`relative flex h-2 w-2 ${proc.state === 'running' ? 'animate-pulse' : ''}`}>
+                            {proc.state === 'running' && (
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                            )}
+                            <span className={`relative inline-flex rounded-full h-2 w-2 ${
+                              proc.state === 'running' ? 'bg-emerald-400' :
+                              proc.state === 'stopped' ? 'bg-red-400' :
+                              proc.state === 'disabled' ? 'bg-gray-400' :
+                              proc.state === 'expected_missing' ? 'bg-blue-400' :
+                              'bg-amber-400'
+                            }`}></span>
+                          </span>
                           {getStateLabel(proc.state)}
                         </span>
                       </td>
@@ -482,6 +530,43 @@ export default function Overview() {
                       </td>
                       <td className="px-6 py-4">
                         <span className="text-sm text-noc-muted">{proc.description}</span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              // TODO: 实现重启功能
+                              alert(`重启 ${proc.name}`);
+                            }}
+                            className="p-1.5 rounded-md text-noc-muted hover:text-amber-400 hover:bg-amber-500/10 transition-colors"
+                            title="重启"
+                          >
+                            <RotateCcw className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              // TODO: 实现查看日志功能
+                              alert(`查看 ${proc.name} 日志`);
+                            }}
+                            className="p-1.5 rounded-md text-noc-muted hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
+                            title="查看日志"
+                          >
+                            <FileText className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              // TODO: 实现终端功能
+                              alert(`进入 ${proc.name} 终端`);
+                            }}
+                            className="p-1.5 rounded-md text-noc-muted hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                            title="进入终端"
+                          >
+                            <Terminal className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

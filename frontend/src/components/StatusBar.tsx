@@ -4,7 +4,7 @@ import { useI18n } from '@/i18nContext';
 import { Sun, Moon } from 'lucide-react';
 
 export default function StatusBar() {
-  const { status } = useMonitor();
+  const { wsStatus } = useMonitor();
   const { theme, toggleTheme } = useTheme();
   const { language, setLanguage, t } = useI18n();
 
@@ -30,7 +30,7 @@ export default function StatusBar() {
     },
   };
 
-  const cfg = statusConfig[status];
+  const cfg = statusConfig[wsStatus];
 
   return (
     <header className="h-12 flex-shrink-0 bg-noc-surface border-b border-noc-border flex items-center justify-between px-6">

@@ -28,11 +28,15 @@ export default defineConfig({
       },
       // WebSocket 连接代理 (路径也以 /api 开头)
       '/api/v1/monitor/ws': {
-        target: 'ws://10.10.0.139:8088',
+        target: 'ws://localhost:8088',
         ws: true,
       },
       '/api/v1/nf/logs/ws': {
-        target: 'ws://10.10.0.139:8088',
+        target: 'ws://localhost:8088',
+        ws: true,
+      },
+      '/api/v1/deployment/ws': {
+        target: 'ws://localhost:8088',
         ws: true,
       },
     },

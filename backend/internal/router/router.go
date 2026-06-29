@@ -82,7 +82,7 @@ func getExt(path string) string {
 
 // New 创建并返回路由注册完成的 http.ServeMux
 // staticFS 为嵌入的前端 dist 文件系统（已通过 fs.Sub 剥离前缀），传 nil 时跳过静态托管
-func New(h *handler.Handler, wh *ws.WSHandler, lsh *ws.LogStreamHandler, dh *handler.DiscoveryHandler, staticFS fs.FS) *http.ServeMux {
+func New(h *handler.Handler, wh *ws.WSHandler, lsh *ws.LogStreamHandler, dh *handler.DiscoveryHandler, dwh *ws.DeploymentWSHandler, staticFS fs.FS) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	// RBAC 中间件定义
@@ -208,6 +208,9 @@ func New(h *handler.Handler, wh *ws.WSHandler, lsh *ws.LogStreamHandler, dh *han
 		// UE 信息
 		case r.URL.Path == "/api/v1/ue-info":
 			h.GetUEInfo(w, r)
+		// 部署状态 WebSocket
+		case r.URL.Path == "/api/v1/deployment/ws":
+			dwh.MonitorDeploymentWS(w, r)
 		// P3: 站点管理
 		case r.URL.Path == "/api/v1/sites" && r.Method == http.MethodGet:
 			h.GetSites(w, r)

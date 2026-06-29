@@ -101,6 +101,7 @@ func main() {
 	h := handler.NewWithAllDB(mc, mysqlDB, scscfDB, cfg.LogDir, cfg.Auth)
 	wh := ws.NewWSHandler(mc, cfg.Notify.WebhookURL, cfg.Notify.MinLevel, cfg.Auth.Enabled)
 	lsh := ws.NewLogStreamHandler(cfg.LogDir, cfg.Auth.Enabled)
+	dwh := ws.NewDeploymentWSHandler(mc, scscfDB, cfg.Auth.Enabled)
 
 	// 启动定时任务调度器
 	sched := scheduler.New(mc)
@@ -132,7 +133,7 @@ func main() {
 	watcher.Start()
 
 	// 路由注册
-	mux := router.New(h, wh, lsh, dh, subFS)
+	mux := router.New(h, wh, lsh, dh, dwh, subFS)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	log.Printf("server starting on %s", addr)

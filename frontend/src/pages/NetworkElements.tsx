@@ -17,7 +17,7 @@ import {
   HardDrive,
   RotateCw,
 } from 'lucide-react';
-import type { LogLine, ProcessStatus, Site } from '@/types/monitor';
+import type { LogLine, Site } from '@/types/monitor';
 
 // ---------------------------------------------------------------------------
 // Virtual Location Tree Types
@@ -32,32 +32,44 @@ interface TreeNode {
 }
 
 // Static location tree definition (fallback when Sites API returns empty)
+// 按照运营商实际网络架构组织
 const FALLBACK_LOCATION_TREE: TreeNode[] = [
   {
-    id: 'south-china',
-    label: 'South China Region',
+    id: 'core-network',
+    label: '核心网',
     icon: 'region',
     nfIds: [],
     children: [
       {
-        id: 'jiangmen-dc',
-        label: 'Jiangmen Core DC',
+        id: '5gc',
+        label: '5G 核心网 (5GC)',
         icon: 'dc',
-        nfIds: ['amfd', 'smfd', 'mmed', 'hssd', 'udmd', 'udrd', 'ausfd', 'pcfd', 'pcrfd', 'nrfd', 'nssfd', 'scpd', 'bsfd', 'drad', 'ocsd'],
+        nfIds: ['amfd', 'smfd', 'upfd', 'ausfd', 'nssfd', 'nrfd', 'pcfd', 'udmd', 'udrd', 'scpd', 'bsfd'],
         children: [
-          { id: 'jiangmen-cp', label: 'Control Plane', icon: 'node', nfIds: ['amfd', 'smfd', 'mmed', 'nrfd', 'nssfd', 'scpd'] },
-          { id: 'jiangmen-dm', label: 'Data Management', icon: 'node', nfIds: ['hssd', 'udmd', 'udrd', 'ausfd'] },
-          { id: 'jiangmen-sp', label: 'Session & Policy', icon: 'node', nfIds: ['pcfd', 'pcrfd', 'bsfd', 'drad', 'ocsd'] },
+          { id: '5gc-cp', label: '控制面', icon: 'node', nfIds: ['amfd', 'smfd', 'nrfd', 'nssfd', 'scpd'] },
+          { id: '5gc-up', label: '用户面', icon: 'node', nfIds: ['upfd'] },
+          { id: '5gc-dm', label: '数据管理', icon: 'node', nfIds: ['ausfd', 'udmd', 'udrd', 'pcfd', 'bsfd'] },
         ],
       },
       {
-        id: 'maoming-edge',
-        label: 'Maoming Edge Node',
+        id: 'epc',
+        label: '4G 核心网 (EPC)',
         icon: 'dc',
-        nfIds: ['upfd', 'sgwud', 'pgwud', 'sgwcd', 'pgwcd'],
+        nfIds: ['mmed', 'hssd', 'sgwcd', 'sgwud', 'pgwcd', 'pgwud', 'pcrfd', 'drad', 'ocsd'],
         children: [
-          { id: 'maoming-5g-up', label: '5G User Plane', icon: 'node', nfIds: ['upfd'] },
-          { id: 'maoming-epc-up', label: 'EPC User Plane', icon: 'node', nfIds: ['sgwud', 'pgwud', 'sgwcd', 'pgwcd'] },
+          { id: 'epc-cp', label: '控制面', icon: 'node', nfIds: ['mmed', 'hssd', 'sgwcd', 'pgwcd', 'pcrfd'] },
+          { id: 'epc-up', label: '用户面', icon: 'node', nfIds: ['sgwud', 'pgwud'] },
+          { id: 'epc-charging', label: '计费系统', icon: 'node', nfIds: ['ocsd', 'drad'] },
+        ],
+      },
+      {
+        id: 'ims',
+        label: 'IMS 核心网',
+        icon: 'dc',
+        nfIds: ['pcscfd', 'scscfd', 'icscfd', 'imsHss'],
+        children: [
+          { id: 'ims-cscf', label: 'CSCF', icon: 'node', nfIds: ['pcscfd', 'scscfd', 'icscfd'] },
+          { id: 'ims-hss', label: 'HSS', icon: 'node', nfIds: ['imsHss'] },
         ],
       },
     ],
@@ -133,7 +145,7 @@ function TreeView({
   nodes: TreeNode[];
   selectedId: string;
   onSelect: (id: string) => void;
-  processMap: Map<string, ProcessStatus>;
+  processMap: Map<string, { running: boolean; cpu: number; mem: number; pid: number }>;
   depth?: number;
 }) {
   return (
@@ -162,7 +174,7 @@ function TreeNodeItem({
   node: TreeNode;
   selectedId: string;
   onSelect: (id: string) => void;
-  processMap: Map<string, ProcessStatus>;
+  processMap: Map<string, { running: boolean; cpu: number; mem: number; pid: number }>;
   depth: number;
 }) {
   const [expanded, setExpanded] = useState(depth < 2);
@@ -251,7 +263,7 @@ function TreeNodeItem({
 // ---------------------------------------------------------------------------
 
 export default function NetworkElements() {
-  const { snapshot } = useMonitor();
+  const { deploymentStatus } = useMonitor();
   const [searchParams] = useSearchParams();
   const [filter, setFilter] = useState(searchParams.get('filter') || '');
   const [locationTree, setLocationTree] = useState<TreeNode[]>(FALLBACK_LOCATION_TREE);
@@ -268,7 +280,8 @@ export default function NetworkElements() {
   const logContainerRef = useRef<HTMLDivElement>(null);
   const selectedNfRef = useRef<string | null>(null);
 
-  const processes = snapshot?.processes ?? [];
+  // 从部署状态获取进程数据
+  const processes = deploymentStatus?.processes ?? [];
 
   // Fetch sites and build dynamic location tree
   useEffect(() => {
@@ -285,9 +298,14 @@ export default function NetworkElements() {
 
   // Process map for quick lookup
   const processMap = useMemo(() => {
-    const map = new Map<string, ProcessStatus>();
+    const map = new Map<string, { running: boolean; cpu: number; mem: number; pid: number }>();
     for (const p of processes) {
-      map.set(p.name, p);
+      map.set(p.name, {
+        running: p.state === 'running',
+        cpu: p.cpu_percent,
+        mem: p.memory_rss,
+        pid: p.pid,
+      });
     }
     return map;
   }, [processes]);
@@ -312,7 +330,7 @@ export default function NetworkElements() {
   // Stats for selected node
   const nodeStats = useMemo(() => {
     const total = tableProcesses.length;
-    const running = tableProcesses.filter((p) => p.running).length;
+    const running = tableProcesses.filter((p) => p.state === 'running').length;
     return { total, running, stopped: total - running };
   }, [tableProcesses]);
 
@@ -619,7 +637,7 @@ export default function NetworkElements() {
                           </div>
                         </td>
                         <td className="px-4 py-2.5">
-                          {p.running ? (
+                          {p.state === 'running' ? (
                             <span className="flex items-center gap-1 text-[10px] text-noc-success bg-noc-success-10 px-1.5 py-0.5 rounded w-fit">
                               <span className="w-1.5 h-1.5 rounded-full bg-noc-success" />
                               Running
@@ -632,12 +650,12 @@ export default function NetworkElements() {
                           )}
                         </td>
                         <td className="px-4 py-2.5 text-xs text-noc-muted">{getLocationLabel(p.name)}</td>
-                        <td className="px-4 py-2.5 text-xs text-noc-muted font-mono">{p.running ? p.pid : '-'}</td>
+                        <td className="px-4 py-2.5 text-xs text-noc-muted font-mono">{p.state === 'running' ? p.pid : '-'}</td>
                         <td className={`px-4 py-2.5 text-xs font-mono tabular-nums ${cpuColor}`}>
-                          {p.running ? `${p.cpu_percent.toFixed(1)}%` : '-'}
+                          {p.state === 'running' ? `${p.cpu_percent.toFixed(1)}%` : '-'}
                         </td>
                         <td className={`px-4 py-2.5 text-xs font-mono tabular-nums ${memColor}`}>
-                          {p.running ? `${memMB.toFixed(0)} MB` : '-'}
+                          {p.state === 'running' ? `${memMB.toFixed(0)} MB` : '-'}
                         </td>
                         <td className="px-4 py-2.5 text-right">
                           <button

@@ -1,22 +1,46 @@
 import React, { createContext, useContext, useMemo } from 'react';
-import { useMonitorSocket } from '@/hooks/useMonitorSocket';
-import type { MonitorSnapshot, WsStatus } from '@/types/monitor';
+import { useUnifiedSocket } from '@/hooks/useUnifiedSocket';
+import type { MonitorSnapshot, WsStatus, SystemStatusEnhanced } from '@/types/monitor';
+
+// 业务指标类型
+interface BusinessMetricsData {
+  epc_online_users: number;
+  ims_online_users: number;
+  total_subscribers: number;
+  total_ims_users: number;
+  active_calls: number;
+  sip_reg_success_rate: number;
+}
 
 // Context 值类型
 interface MonitorContextValue {
-  status: WsStatus;
+  // WebSocket 状态
+  wsStatus: WsStatus;
+
+  // 进程状态（兼容旧接口）
   snapshot: MonitorSnapshot | null;
   onlineCount: number;
   offlineCount: number;
   totalCpu: number;
   totalMemoryRss: number;
+
+  // 部署状态
+  deploymentStatus: SystemStatusEnhanced | null;
+
+  // 业务指标
+  businessMetrics: BusinessMetricsData | null;
 }
 
 const MonitorContext = createContext<MonitorContextValue | null>(null);
 
-// Provider 组件，挂载 WebSocket 并计算派生统计值
+// Provider 组件，挂载统一 WebSocket 并计算派生统计值
 export function MonitorProvider({ children }: { children: React.ReactNode }) {
-  const { status, snapshot } = useMonitorSocket();
+  const {
+    status: wsStatus,
+    deploymentStatus,
+    businessMetrics,
+    snapshot,
+  } = useUnifiedSocket();
 
   const derived = useMemo(() => {
     if (!snapshot || !snapshot.processes) {
@@ -43,11 +67,13 @@ export function MonitorProvider({ children }: { children: React.ReactNode }) {
 
   const value: MonitorContextValue = useMemo(
     () => ({
-      status,
+      wsStatus,
       snapshot,
+      deploymentStatus,
+      businessMetrics,
       ...derived,
     }),
-    [status, snapshot, derived],
+    [wsStatus, snapshot, deploymentStatus, businessMetrics, derived],
   );
 
   return <MonitorContext.Provider value={value}>{children}</MonitorContext.Provider>;

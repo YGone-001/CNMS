@@ -166,20 +166,35 @@ const NF_NODES: NfDef[] = [
 ];
 
 // -- 3GPP Interface Reference Map ----------------------------------------
+// 注意：键必须按字母顺序排列（使用 .sort() 规范化）
 const INTERFACE_MAP: Record<string, string> = {
-  'amfd|smfd':   'N11',    'amfd|ausfd':  'N12',
-  'amfd|pcfd':   'N8',     'amfd|udmd':   'N8',
-  'smfd|upfd':   'N4',     'smfd|pcfd':   'N7',
-  'smfd|udmd':   'N10',    'amfd|nrfd':   'Nnrf',
-  'smfd|nrfd':   'Nnrf',   'ausfd|nrfd':  'Nnrf',
-  'udmd|nrfd':   'Nnrf',   'pcfd|nrfd':   'Nnrf',
-  'ausfd|udmd':  'Nausf',  'udmd|udrd':   'Nudr',
-  'pcfd|udrd':   'N5',     'pcfd|udmd':   'N7',
-  'amfd|mmed':   'N26',    'mmed|hssd':   'S6a',
-  'mmed|sgwcd':  'S11',    'sgwcd|sgwud': 'Sxa',
-  'sgwcd|pgwcd': 'S5',     'pgwcd|pgwud': 'Sxb',
-  'pgwcd|pcrfd': 'Gx',     'pcrfd|ocsd':  'Sy',
-  'pcrfd|drad':  'Gx',     'hssd|udrd':   'Ud',
+  // 5G Core SBA 接口
+  'amfd|ausfd':  'N12',    'amfd|mmed':   'N26',
+  'amfd|nrfd':   'Nnrf',   'amfd|pcfd':   'N8',
+  'amfd|smfd':   'N11',    'amfd|udmd':   'N8',
+  'ausfd|nrfd':  'Nnrf',   'ausfd|scpd':  'Nnrf',
+  'ausfd|udmd':  'Nausf',
+  'nrfd|scpd':   'Nnrf',
+  'pcfd|bsfd':   'Nbsf',   'pcfd|nrfd':   'Nnrf',
+  'pcfd|scpd':   'Nnrf',   'pcfd|udmd':   'N7',
+  'pcfd|udrd':   'N5',
+  'smfd|bsfd':   'Nbsf',   'smfd|nrfd':   'Nnrf',
+  'smfd|pcfd':   'N7',     'smfd|scpd':   'Nnrf',
+  'smfd|udmd':   'N10',    'smfd|upfd':   'N4',
+  'udmd|nrfd':   'Nnrf',   'udmd|scpd':   'Nnrf',
+  'udmd|udrd':   'Nudr',
+
+  // 4G EPC 接口
+  'hssd|drad':   'S6a',    'hssd|mmed':   'S6a',
+  'hssd|udrd':   'Ud',
+  'mmed|drad':   'S6a',    'mmed|sgwcd':  'S11',
+  'ocsd|pcrfd':  'Sy',     'ocsd|pgwcd':  'Gy',
+  'pcrfd|drad':  'Gx',     'pcrfd|pgwcd': 'Gx',
+  'pgwcd|drad':  'Gx',     'pgwcd|ocsd':  'Gy',
+  'pgwcd|pcrfd': 'Gx',     'pgwcd|pgwud': 'Sxb',
+  'pgwcd|sgwcd': 'S5',
+  'sgwcd|pgwcd': 'S5',     'sgwcd|pgwud': 'Sxa',
+  'sgwcd|sgwud': 'Sxa',
 };
 
 function resolveInterface(source: string, target: string): string {
@@ -193,6 +208,16 @@ interface LinkDef {
   target: string;
   view?:  ViewMode[];
 }
+
+// Diameter 接口的网元对（当 DRA 未启动时直接连接）
+const DIAMETER_PAIRS: [string, string][] = [
+  ['mmed', 'hssd'],    // S6a
+  ['mmed', 'sgwcd'],   // S11
+  ['pgwcd', 'pcrfd'],  // Gx
+  ['pgwcd', 'ocsd'],   // Gy (在线计费)
+  ['pcrfd', 'ocsd'],   // Sy (策略计费)
+  ['hssd', 'udrd'],    // Ud
+];
 
 const NF_LINKS: LinkDef[] = [
   { source: 'amfd',  target: 'smfd'  },
@@ -218,9 +243,22 @@ const NF_LINKS: LinkDef[] = [
   { source: 'sgwcd', target: 'pgwcd' },
   { source: 'pgwcd', target: 'pgwud' },
   { source: 'pgwcd', target: 'pcrfd' },
+  { source: 'pgwcd', target: 'ocsd'  },
   { source: 'pcrfd', target: 'ocsd'  },
-  { source: 'pcrfd', target: 'drad'  },
+  { source: 'pcrfd', target: 'drad', view: ['all', '4g'] },
   { source: 'hssd',  target: 'udrd'  },
+  // DRA 连接（当 DRA 启动时显示）
+  { source: 'mmed',  target: 'drad', view: ['all', '4g'] },
+  { source: 'hssd',  target: 'drad', view: ['all', '4g'] },
+  { source: 'pgwcd', target: 'drad', view: ['all', '4g'] },
+  // BSF 连接（Binding Support Function）
+  { source: 'pcfd',  target: 'bsfd'  },
+  { source: 'smfd',  target: 'bsfd'  },
+  // SCP 连接（Service Communication Proxy）
+  { source: 'nrfd',  target: 'scpd'  },
+  { source: 'ausfd', target: 'scpd'  },
+  { source: 'udmd',  target: 'scpd'  },
+  { source: 'pcfd',  target: 'scpd'  },
 ];
 
 function isLinkVisible(link: LinkDef, view: ViewMode): boolean {
@@ -451,7 +489,7 @@ function NFDrawer({
 // Main Component
 // =====================================================================
 export default function Topology() {
-  const { snapshot } = useMonitor();
+  const { deploymentStatus } = useMonitor();
   const [activeView, setActiveView] = useState<ViewMode>('all');
   const [healthMap, setHealthMap] = useState<Map<string, HealthResult>>(new Map());
   const topo = useTopologyTheme();
@@ -510,10 +548,10 @@ export default function Topology() {
 
   const statusMap = useMemo(() => {
     const map = new Map<string, { running: boolean; cpu: number; mem: number; pid: number }>();
-    if (snapshot?.processes) {
-      for (const p of snapshot.processes) {
+    if (deploymentStatus?.processes) {
+      for (const p of deploymentStatus.processes) {
         map.set(p.name, {
-          running: p.running,
+          running: p.state === 'running',
           cpu: p.cpu_percent,
           mem: p.memory_rss,
           pid: p.pid,
@@ -521,7 +559,7 @@ export default function Topology() {
       }
     }
     return map;
-  }, [snapshot]);
+  }, [deploymentStatus]);
 
   // Filtered alarms for selected NF
   const nfAlarms = useMemo(() => {
@@ -530,12 +568,27 @@ export default function Topology() {
   }, [dbAlarms, selectedNF]);
 
   const option: EChartsOption = useMemo(() => {
-    const visibleNodes = NF_NODES.filter((nf) => isNodeVisible(nf.id, activeView));
+    // 检查 DRA 是否运行
+    const draRunning = statusMap.get('drad')?.running ?? false;
+
+    // 过滤可见节点（当 DRA 未运行时隐藏 DRA 节点）
+    const visibleNodes = NF_NODES.filter((nf) => {
+      if (!isNodeVisible(nf.id, activeView)) return false;
+      // 如果 DRA 未运行，隐藏 DRA 节点
+      if (nf.id === 'drad' && !draRunning) return false;
+      return true;
+    });
 
     const graphNodes = visibleNodes.map((nf) => {
       const st = statusMap.get(nf.id);
       const running = st?.running ?? false;
-      const baseColor = DOMAIN_COLOR[nf.domain] ?? topo.domain.legacy;
+
+      // 根据运行状态决定节点颜色
+      // 运行中 = 绿色（Healthy）
+      // 已停止 = 红色（Down）
+      const nodeBg = running ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)';
+      const borderColor = running ? '#22C55E' : '#EF4444';
+      const shadowColor = running ? 'rgba(34, 197, 94, 0.4)' : 'rgba(239, 68, 68, 0.4)';
 
       return {
         id: nf.id,
@@ -546,11 +599,11 @@ export default function Topology() {
         symbolSize: 48,
         fixed: true,
         itemStyle: {
-          color: running ? topo.nodeBgRunning : topo.nodeBgStopped,
-          borderColor: running ? baseColor : topo.stoppedBorder,
+          color: nodeBg,
+          borderColor: borderColor,
           borderWidth: running ? 2 : 2.5,
-          shadowBlur: running ? 4 : 0,
-          shadowColor: running ? baseColor + '40' : 'transparent',
+          shadowBlur: running ? 8 : 4,
+          shadowColor: shadowColor,
         },
         label: {
           show: true,
@@ -564,8 +617,8 @@ export default function Topology() {
         },
         emphasis: {
           itemStyle: {
-            shadowBlur: 8,
-            shadowColor: running ? baseColor + '60' : 'rgba(220,38,38,0.30)',
+            shadowBlur: 12,
+            shadowColor: shadowColor,
             borderWidth: 3,
           },
           label: { fontSize: 13 },
@@ -591,20 +644,33 @@ export default function Topology() {
     });
 
     const visibleNodeIds = new Set(visibleNodes.map((n) => n.id));
-    const visibleLinks = NF_LINKS.filter(
-      (l) => isLinkVisible(l, activeView)
-        && visibleNodeIds.has(l.source)
-        && visibleNodeIds.has(l.target),
-    );
 
-    const healthColor = (status: string) => {
-      switch (status) {
-        case 'healthy':  return '#22C55E';
-        case 'degraded': return '#F59E0B';
-        case 'down':     return '#EF4444';
-        default:         return '#64748B';
+    // 过滤可见链接
+    const visibleLinks = NF_LINKS.filter((l) => {
+      if (!isLinkVisible(l, activeView)) return false;
+      if (!visibleNodeIds.has(l.source) || !visibleNodeIds.has(l.target)) return false;
+
+      // 如果 DRA 未运行，隐藏 DRA 相关的连接
+      if (!draRunning && (l.source === 'drad' || l.target === 'drad')) {
+        return false;
       }
-    };
+
+      return true;
+    });
+
+    // 如果 DRA 未运行，添加 Diameter 接口的直接连接
+    if (!draRunning) {
+      for (const [src, tgt] of DIAMETER_PAIRS) {
+        if (visibleNodeIds.has(src) && visibleNodeIds.has(tgt)) {
+          const exists = visibleLinks.some(
+            (l) => (l.source === src && l.target === tgt) || (l.source === tgt && l.target === src)
+          );
+          if (!exists) {
+            visibleLinks.push({ source: src, target: tgt });
+          }
+        }
+      }
+    }
 
     const graphLinks = visibleLinks.map((l) => {
       const srcUp = statusMap.get(l.source)?.running ?? false;
@@ -612,31 +678,21 @@ export default function Topology() {
       const active = srcUp && tgtUp;
       const ifaceLabel = resolveInterface(l.source, l.target);
 
-      const srcHealth = healthMap.get(l.source);
-      const tgtHealth = healthMap.get(l.target);
-      const hasHealth = srcHealth && tgtHealth;
+      // 接口标签始终显示（不管节点是否运行）
+      const showLabel = !!ifaceLabel;
 
-      let linkColor = active ? topo.linkActive : topo.linkIdle;
-      let linkWidth = active ? 1.5 : 1;
-      let linkOpacity = active ? 0.45 : 0.30;
-      let linkType: 'dashed' | 'solid' = active ? 'dashed' : 'solid';
-
-      if (hasHealth) {
-        const worstStatus = [srcHealth!.status, tgtHealth!.status].reduce((worst, s) => {
-          const order: Record<string, number> = { healthy: 0, degraded: 1, down: 2, unknown: 3 };
-          return (order[s] ?? 3) > (order[worst] ?? 3) ? s : worst;
-        }, 'healthy');
-        linkColor = healthColor(worstStatus);
-        linkWidth = worstStatus === 'down' ? 2.5 : worstStatus === 'degraded' ? 2 : 1.5;
-        linkOpacity = worstStatus === 'down' ? 0.8 : 0.6;
-        linkType = worstStatus === 'down' ? 'solid' : 'dashed';
-      }
+      // Active 连线：绿色实线，较粗
+      // Idle 连线：灰色虚线，较细
+      let linkColor = active ? '#22C55E' : '#64748B';
+      let linkWidth = active ? 2.5 : 1;
+      let linkOpacity = active ? 0.8 : 0.4;
+      let linkType: 'dashed' | 'solid' = active ? 'solid' : 'dashed';
 
       return {
         source: l.source,
         target: l.target,
         label: {
-          show: !!ifaceLabel,
+          show: showLabel,
           formatter: ifaceLabel,
           fontSize: 11,
           color: topo.linkLabelText,
@@ -685,7 +741,14 @@ export default function Topology() {
             focus: 'adjacency' as const,
             blurScope: 'coordinateSystem' as const,
           },
-          edgeLabel: { show: false },
+          edgeLabel: {
+            show: true,
+            fontSize: 11,
+            color: topo.linkLabelText,
+            backgroundColor: topo.linkLabelBg,
+            padding: [2, 4],
+            borderRadius: 2,
+          },
           animationDuration: 1500,
           animationDelayUpdate: 0,
         },
