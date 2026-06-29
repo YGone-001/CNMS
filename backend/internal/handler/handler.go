@@ -603,6 +603,9 @@ func (h *Handler) GetAlarmHistory(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("active") == "true" {
 		filter["cleared"] = false
 	}
+	if r.URL.Query().Get("acknowledged") == "false" {
+		filter["acknowledged"] = false
+	}
 
 	coll := h.Mongo.Database.Collection("alarms")
 

@@ -88,9 +88,34 @@ interface NavItem {
   badge?: number; // optional alarm badge count
 }
 
+// Fetch active alarm count for sidebar badge
+function useActiveAlarmCount(): number {
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    const fetchCount = async () => {
+      try {
+        const resp = await authFetch('/api/v1/alarms?active=true&acknowledged=false&page_size=1');
+        const data = await resp.json();
+        if (data.status === 'ok') {
+          setCount(data.total ?? 0);
+        }
+      } catch {
+        // silently ignore
+      }
+    };
+    fetchCount();
+    const interval = setInterval(fetchCount, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return count;
+}
+
 // Build flat navigation list using translation function
 function useNavItems(): NavItem[] {
   const { t } = useI18n();
+  const alarmCount = useActiveAlarmCount();
   return useMemo(() => [
     { path: '/', label: t('nav.overview'), icon: LayoutDashboard },
     { path: '/topology', label: t('nav.topology'), icon: Network },
@@ -98,7 +123,7 @@ function useNavItems(): NavItem[] {
     { path: '/agents', label: t('nav.agentManagement'), icon: Wifi },
     { path: '/ue-info', label: t('nav.ueInfo'), icon: Users },
     { path: '/metrics', label: t('nav.metricsHistory'), icon: Activity },
-    { path: '/alarms', label: t('nav.alarms'), icon: Bell, badge: 12 },
+    { path: '/alarms', label: t('nav.alarms'), icon: Bell, badge: alarmCount || undefined },
     { path: '/fault-diagnosis', label: t('nav.faultDiagnosis'), icon: Zap },
     { path: '/fault-resolution', label: t('nav.faultResolution'), icon: Lightbulb },
     { path: '/logs', label: t('nav.logCenter'), icon: FileText },
@@ -108,7 +133,7 @@ function useNavItems(): NavItem[] {
     { path: '/reports', label: t('nav.reports'), icon: BarChart3 },
     { path: '/settings', label: t('nav.systemSettings'), icon: Settings },
     { path: '/docs', label: t('nav.apiDocs'), icon: BookOpen },
-  ], [t]);
+  ], [t, alarmCount]);
 }
 
 // Keep NavGroup interface for backward compatibility (unused but safe)

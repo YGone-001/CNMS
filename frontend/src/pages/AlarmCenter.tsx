@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Bell,
   CheckCircle,
@@ -7,222 +7,69 @@ import {
   Clock,
   RefreshCw,
   Search,
-  MapPin,
   Server,
-  Activity,
   Zap,
   CheckSquare,
+  Square,
+  Loader2,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { authFetch } from '@/App';
+import type { Alarm } from '@/types/monitor';
 
-// 告警类型定义
+// ---- Status mapping from backend Alarm fields ----
+type AlarmStatus = 'active' | 'acknowledged' | 'cleared';
+
+function getAlarmStatus(a: Alarm): AlarmStatus {
+  if (a.cleared) return 'cleared';
+  if (a.acknowledged) return 'acknowledged';
+  return 'active';
+}
+
+// ---- Severity / Status config ----
 type AlarmSeverity = 'critical' | 'major' | 'minor' | 'warning';
-type AlarmStatus = 'active' | 'acknowledged' | 'investigating' | 'resolved' | 'closed';
 
-interface Alarm {
-  id: string;
-  severity: AlarmSeverity;
-  source: string;
-  message: string;
-  firstOccurred: string;
-  lastOccurred: string;
-  count: number;
-  status: AlarmStatus;
-  impactObject: string;
-  site: string;
-  assignee?: string;
-  rootCause?: string;
-  resolution?: string;
-  relatedLogs: RelatedLog[];
-  createdAt: string;
-  updatedAt: string;
-}
+const SEVERITY_CONFIG: Record<AlarmSeverity, { color: string; bg: string; border: string; icon: typeof XCircle; label: string }> = {
+  critical: { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/20', icon: XCircle, label: '严重' },
+  major:    { color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/20', icon: AlertTriangle, label: '主要' },
+  minor:    { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/20', icon: AlertTriangle, label: '次要' },
+  warning:  { color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20', icon: Clock, label: '警告' },
+};
 
-interface RelatedLog {
-  id: string;
-  timestamp: string;
-  level: string;
-  source: string;
-  message: string;
-}
+const STATUS_CONFIG: Record<AlarmStatus, { color: string; bg: string; border: string; icon: typeof CheckCircle; label: string }> = {
+  active:       { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/20', icon: Zap, label: '活跃' },
+  acknowledged: { color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/20', icon: CheckCircle, label: '已确认' },
+  cleared:      { color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', icon: CheckSquare, label: '已清除' },
+};
 
-// 告警统计
-interface AlarmSummary {
-  total: number;
-  critical: number;
-  major: number;
-  minor: number;
-  warning: number;
-  active: number;
-  acknowledged: number;
-  investigating: number;
-  resolved: number;
-}
-
+// ---- Component ----
 export default function AlarmCenter() {
   const navigate = useNavigate();
   const [alarms, setAlarms] = useState<Alarm[]>([]);
-  const [summary, setSummary] = useState<AlarmSummary | null>(null);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [selectedAlarm, setSelectedAlarm] = useState<Alarm | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [severityFilter, setSeverityFilter] = useState<AlarmSeverity | 'all'>('all');
   const [statusFilter, setStatusFilter] = useState<AlarmStatus | 'all'>('all');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [batchLoading, setBatchLoading] = useState(false);
 
-  // 获取告警数据
+  // ---- Fetch alarms from real API ----
   const fetchAlarms = useCallback(async () => {
     setLoading(true);
     try {
-      // 模拟数据 - 实际应该从 API 获取
-      const mockAlarms: Alarm[] = [
-        {
-          id: 'ALM-001',
-          severity: 'critical',
-          source: 'amfd',
-          message: 'AMF 进程停止运行',
-          firstOccurred: '2026-06-26 10:30:00',
-          lastOccurred: '2026-06-26 10:45:00',
-          count: 156,
-          status: 'active',
-          impactObject: '5G 注册服务',
-          site: '上海数据中心',
-          assignee: '张工',
-          rootCause: '内存溢出导致进程崩溃',
-          resolution: '',
-          relatedLogs: [
-            {
-              id: 'LOG-001',
-              timestamp: '2026-06-26 10:30:00',
-              level: 'ERROR',
-              source: 'amfd',
-              message: 'OOM Killed: process amfd exited with code 137',
-            },
-            {
-              id: 'LOG-002',
-              timestamp: '2026-06-26 10:29:55',
-              level: 'WARN',
-              source: 'amfd',
-              message: 'Memory usage exceeded 90% threshold',
-            },
-          ],
-          createdAt: '2026-06-26 10:30:00',
-          updatedAt: '2026-06-26 10:45:00',
-        },
-        {
-          id: 'ALM-002',
-          severity: 'major',
-          source: 'smfd',
-          message: 'SMF CPU 使用率超过 90%',
-          firstOccurred: '2026-06-26 09:15:00',
-          lastOccurred: '2026-06-26 10:40:00',
-          count: 89,
-          status: 'investigating',
-          impactObject: '5G 会话管理',
-          site: '上海数据中心',
-          assignee: '李工',
-          rootCause: '大量并发会话请求导致 CPU 过载',
-          resolution: '',
-          relatedLogs: [
-            {
-              id: 'LOG-003',
-              timestamp: '2026-06-26 10:40:00',
-              level: 'WARN',
-              source: 'smfd',
-              message: 'CPU usage: 92.5%',
-            },
-          ],
-          createdAt: '2026-06-26 09:15:00',
-          updatedAt: '2026-06-26 10:40:00',
-        },
-        {
-          id: 'ALM-003',
-          severity: 'major',
-          source: 'pcscfd',
-          message: 'P-CSCF SIP 信令异常',
-          firstOccurred: '2026-06-26 08:00:00',
-          lastOccurred: '2026-06-26 10:35:00',
-          count: 234,
-          status: 'acknowledged',
-          impactObject: 'VoLTE 呼叫服务',
-          site: '上海数据中心',
-          assignee: '王工',
-          rootCause: 'SIP 消息队列积压',
-          resolution: '',
-          relatedLogs: [
-            {
-              id: 'LOG-004',
-              timestamp: '2026-06-26 10:35:00',
-              level: 'ERROR',
-              source: 'pcscfd',
-              message: 'SIP queue overflow: 1000 messages pending',
-            },
-          ],
-          createdAt: '2026-06-26 08:00:00',
-          updatedAt: '2026-06-26 10:35:00',
-        },
-        {
-          id: 'ALM-004',
-          severity: 'minor',
-          source: 'hssd',
-          message: 'HSS 响应延迟增加',
-          firstOccurred: '2026-06-26 07:30:00',
-          lastOccurred: '2026-06-26 10:00:00',
-          count: 45,
-          status: 'resolved',
-          impactObject: '用户数据查询',
-          site: '北京数据中心',
-          assignee: '赵工',
-          rootCause: '数据库连接池耗尽',
-          resolution: '已增加连接池大小，响应时间恢复正常',
-          relatedLogs: [
-            {
-              id: 'LOG-005',
-              timestamp: '2026-06-26 10:00:00',
-              level: 'INFO',
-              source: 'hssd',
-              message: 'Response time restored to normal: 50ms',
-            },
-          ],
-          createdAt: '2026-06-26 07:30:00',
-          updatedAt: '2026-06-26 10:00:00',
-        },
-        {
-          id: 'ALM-005',
-          severity: 'warning',
-          source: 'upfd',
-          message: 'UPF 丢包率轻微上升',
-          firstOccurred: '2026-06-26 09:00:00',
-          lastOccurred: '2026-06-26 10:20:00',
-          count: 12,
-          status: 'active',
-          impactObject: '用户面数据传输',
-          site: '广州数据中心',
-          assignee: '',
-          rootCause: '',
-          resolution: '',
-          relatedLogs: [],
-          createdAt: '2026-06-26 09:00:00',
-          updatedAt: '2026-06-26 10:20:00',
-        },
-      ];
-
-      setAlarms(mockAlarms);
-
-      // 计算统计
-      const summary: AlarmSummary = {
-        total: mockAlarms.length,
-        critical: mockAlarms.filter((a) => a.severity === 'critical').length,
-        major: mockAlarms.filter((a) => a.severity === 'major').length,
-        minor: mockAlarms.filter((a) => a.severity === 'minor').length,
-        warning: mockAlarms.filter((a) => a.severity === 'warning').length,
-        active: mockAlarms.filter((a) => a.status === 'active').length,
-        acknowledged: mockAlarms.filter((a) => a.status === 'acknowledged').length,
-        investigating: mockAlarms.filter((a) => a.status === 'investigating').length,
-        resolved: mockAlarms.filter((a) => a.status === 'resolved').length,
-      };
-      setSummary(summary);
+      const resp = await authFetch('/api/v1/alarms?page_size=200');
+      const data = await resp.json();
+      if (data.status === 'ok') {
+        const list: Alarm[] = data.alarms ?? [];
+        setAlarms(list);
+        setTotal(data.total ?? list.length);
+        // Auto-select first alarm if none selected
+        setSelectedAlarm(prev => prev ?? (list.length > 0 ? list[0] : null));
+      }
     } catch (err) {
-      console.error('Error fetching alarms:', err);
+      console.error('fetch alarms error:', err);
     } finally {
       setLoading(false);
     }
@@ -234,153 +81,119 @@ export default function AlarmCenter() {
     return () => clearInterval(interval);
   }, [fetchAlarms]);
 
-  // 过滤告警
-  const filteredAlarms = alarms.filter((alarm) => {
-    const matchesSearch =
-      alarm.source.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      alarm.message.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      alarm.impactObject.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesSeverity = severityFilter === 'all' || alarm.severity === severityFilter;
-    const matchesStatus = statusFilter === 'all' || alarm.status === statusFilter;
-    return matchesSearch && matchesSeverity && matchesStatus;
-  });
-
-  // 获取严重级别配置
-  const getSeverityConfig = (severity: AlarmSeverity) => {
-    switch (severity) {
-      case 'critical':
-        return {
-          color: 'text-red-400',
-          bg: 'bg-red-500/10',
-          border: 'border-red-500/20',
-          icon: XCircle,
-          label: '严重',
-        };
-      case 'major':
-        return {
-          color: 'text-amber-400',
-          bg: 'bg-amber-500/10',
-          border: 'border-amber-500/20',
-          icon: AlertTriangle,
-          label: '主要',
-        };
-      case 'minor':
-        return {
-          color: 'text-yellow-400',
-          bg: 'bg-yellow-500/10',
-          border: 'border-yellow-500/20',
-          icon: AlertTriangle,
-          label: '次要',
-        };
-      case 'warning':
-        return {
-          color: 'text-blue-400',
-          bg: 'bg-blue-500/10',
-          border: 'border-blue-500/20',
-          icon: Clock,
-          label: '警告',
-        };
+  // ---- Summary stats ----
+  const summary = useMemo(() => {
+    const s = { total: alarms.length, critical: 0, major: 0, minor: 0, warning: 0, active: 0, acknowledged: 0, cleared: 0 };
+    for (const a of alarms) {
+      const sev = a.severity as AlarmSeverity;
+      if (sev in s) s[sev]++;
+      const st = getAlarmStatus(a);
+      s[st]++;
     }
-  };
+    return s;
+  }, [alarms]);
 
-  // 获取状态配置
-  const getStatusConfig = (status: AlarmStatus) => {
-    switch (status) {
-      case 'active':
-        return {
-          color: 'text-red-400',
-          bg: 'bg-red-500/10',
-          border: 'border-red-500/20',
-          icon: Zap,
-          label: '活跃',
-        };
-      case 'acknowledged':
-        return {
-          color: 'text-amber-400',
-          bg: 'bg-amber-500/10',
-          border: 'border-amber-500/20',
-          icon: CheckCircle,
-          label: '已确认',
-        };
-      case 'investigating':
-        return {
-          color: 'text-blue-400',
-          bg: 'bg-blue-500/10',
-          border: 'border-blue-500/20',
-          icon: Search,
-          label: '调查中',
-        };
-      case 'resolved':
-        return {
-          color: 'text-emerald-400',
-          bg: 'bg-emerald-500/10',
-          border: 'border-emerald-500/20',
-          icon: CheckCircle,
-          label: '已解决',
-        };
-      case 'closed':
-        return {
-          color: 'text-gray-400',
-          bg: 'bg-gray-500/10',
-          border: 'border-gray-500/20',
-          icon: CheckSquare,
-          label: '已关闭',
-        };
-    }
-  };
+  // ---- Filter ----
+  const filteredAlarms = useMemo(() => {
+    return alarms.filter((alarm) => {
+      const matchesSearch =
+        alarm.source.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        alarm.message.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesSeverity = severityFilter === 'all' || alarm.severity === severityFilter;
+      const alarmStatus = getAlarmStatus(alarm);
+      const matchesStatus = statusFilter === 'all' || alarmStatus === statusFilter;
+      return matchesSearch && matchesSeverity && matchesStatus;
+    });
+  }, [alarms, searchTerm, severityFilter, statusFilter]);
 
-  // 跳转到故障诊断
-  const goToFaultDiagnosis = (alarm: Alarm) => {
-    navigate('/fault-diagnosis', {
-      state: {
-        alarmId: alarm.id,
-        source: alarm.source,
-        message: alarm.message,
-      },
+  // ---- Batch selection ----
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
     });
   };
 
-  // 确认告警
-  const acknowledgeAlarm = async (alarmId: string) => {
-    // TODO: 调用 API
-    setAlarms((prev) =>
-      prev.map((a) =>
-        a.id === alarmId
-          ? { ...a, status: 'acknowledged' as AlarmStatus, updatedAt: new Date().toISOString() }
-          : a
-      )
-    );
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredAlarms.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredAlarms.map(a => a._id)));
+    }
   };
 
-  // 开始调查
-  const investigateAlarm = async (alarmId: string) => {
-    // TODO: 调用 API
-    setAlarms((prev) =>
-      prev.map((a) =>
-        a.id === alarmId
-          ? { ...a, status: 'investigating' as AlarmStatus, updatedAt: new Date().toISOString() }
-          : a
-      )
-    );
+  // ---- Batch ACK via MML ----
+  const batchAcknowledge = async () => {
+    if (selectedIds.size === 0) return;
+    setBatchLoading(true);
+    try {
+      const promises = [...selectedIds].map(id =>
+        authFetch('/api/v1/mml/execute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ command: `ACK-ALARM: ID=${id};` }),
+        })
+      );
+      await Promise.all(promises);
+      setSelectedIds(new Set());
+      await fetchAlarms();
+    } catch (err) {
+      console.error('batch ack error:', err);
+    } finally {
+      setBatchLoading(false);
+    }
   };
 
-  // 解决告警
-  const resolveAlarm = async (alarmId: string, resolution: string) => {
-    // TODO: 调用 API
-    setAlarms((prev) =>
-      prev.map((a) =>
-        a.id === alarmId
-          ? {
-              ...a,
-              status: 'resolved' as AlarmStatus,
-              resolution,
-              updatedAt: new Date().toISOString(),
-            }
-          : a
-      )
-    );
+  // ---- Batch CLR via MML ----
+  const batchClear = async () => {
+    if (selectedIds.size === 0) return;
+    setBatchLoading(true);
+    try {
+      const promises = [...selectedIds].map(id =>
+        authFetch('/api/v1/mml/execute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ command: `CLR-ALARM: ID=${id};` }),
+        })
+      );
+      await Promise.all(promises);
+      setSelectedIds(new Set());
+      await fetchAlarms();
+    } catch (err) {
+      console.error('batch clr error:', err);
+    } finally {
+      setBatchLoading(false);
+    }
   };
 
+  // ---- Single alarm actions ----
+  const acknowledgeAlarm = async (id: string) => {
+    await authFetch('/api/v1/mml/execute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: `ACK-ALARM: ID=${id};` }),
+    });
+    await fetchAlarms();
+  };
+
+  const clearAlarm = async (id: string) => {
+    await authFetch('/api/v1/mml/execute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: `CLR-ALARM: ID=${id};` }),
+    });
+    await fetchAlarms();
+  };
+
+  // ---- Format time ----
+  const fmtTime = (t?: string) => {
+    if (!t) return '-';
+    return new Date(t).toLocaleString('zh-CN', { hour12: false });
+  };
+
+  // ---- Loading state ----
   if (loading && alarms.length === 0) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -398,7 +211,9 @@ export default function AlarmCenter() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-noc-text">告警中心</h1>
-          <p className="text-sm text-noc-muted mt-1">告警生命周期管理</p>
+          <p className="text-sm text-noc-muted mt-1">
+            共 {total} 条告警，{summary.active} 条活跃
+          </p>
         </div>
         <button
           onClick={fetchAlarms}
@@ -409,33 +224,22 @@ export default function AlarmCenter() {
         </button>
       </div>
 
-      {/* 统计卡片 */}
-      {summary && (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <div className="bg-noc-surface border border-noc-border rounded-lg p-4">
-            <div className="text-sm text-noc-muted mb-1">总告警</div>
-            <div className="text-2xl font-bold text-noc-text">{summary.total}</div>
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {([
+          { label: '总告警', value: summary.total, color: 'text-noc-text', borderColor: 'border-noc-border' },
+          { label: '严重', value: summary.critical, color: 'text-red-400', borderColor: 'border-red-500/20' },
+          { label: '主要', value: summary.major, color: 'text-amber-400', borderColor: 'border-amber-500/20' },
+          { label: '活跃', value: summary.active, color: 'text-blue-400', borderColor: 'border-blue-500/20' },
+        ] as const).map(c => (
+          <div key={c.label} className={`bg-noc-surface border ${c.borderColor} rounded-lg p-4`}>
+            <div className={`text-sm ${c.color} mb-1`}>{c.label}</div>
+            <div className={`text-2xl font-bold ${c.color}`}>{c.value}</div>
           </div>
-          <div className="bg-noc-surface border border-red-500/20 rounded-lg p-4">
-            <div className="text-sm text-red-400 mb-1">严重</div>
-            <div className="text-2xl font-bold text-red-400">{summary.critical}</div>
-          </div>
-          <div className="bg-noc-surface border border-amber-500/20 rounded-lg p-4">
-            <div className="text-sm text-amber-400 mb-1">主要</div>
-            <div className="text-2xl font-bold text-amber-400">{summary.major}</div>
-          </div>
-          <div className="bg-noc-surface border border-blue-500/20 rounded-lg p-4">
-            <div className="text-sm text-blue-400 mb-1">活跃</div>
-            <div className="text-2xl font-bold text-blue-400">{summary.active}</div>
-          </div>
-          <div className="bg-noc-surface border border-emerald-500/20 rounded-lg p-4">
-            <div className="text-sm text-emerald-400 mb-1">已解决</div>
-            <div className="text-2xl font-bold text-emerald-400">{summary.resolved}</div>
-          </div>
-        </div>
-      )}
+        ))}
+      </div>
 
-      {/* 过滤器 */}
+      {/* Filters + Batch actions */}
       <div className="flex items-center gap-4 flex-wrap">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-noc-muted" />
@@ -466,72 +270,104 @@ export default function AlarmCenter() {
           <option value="all">所有状态</option>
           <option value="active">活跃</option>
           <option value="acknowledged">已确认</option>
-          <option value="investigating">调查中</option>
-          <option value="resolved">已解决</option>
+          <option value="cleared">已清除</option>
         </select>
+
+        {/* Batch actions */}
+        {selectedIds.size > 0 && (
+          <div className="flex items-center gap-2 ml-auto">
+            <span className="text-xs text-noc-muted">已选 {selectedIds.size} 条</span>
+            <button
+              onClick={batchAcknowledge}
+              disabled={batchLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-lg text-xs hover:bg-amber-500/20 transition-colors disabled:opacity-50"
+            >
+              {batchLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle className="w-3 h-3" />}
+              批量确认
+            </button>
+            <button
+              onClick={batchClear}
+              disabled={batchLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-lg text-xs hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
+            >
+              {batchLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckSquare className="w-3 h-3" />}
+              批量清除
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* 告警列表 */}
+      {/* Alarm list + detail panel */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* 告警列表 */}
-        <div className="lg:col-span-2 space-y-4">
+        {/* List */}
+        <div className="lg:col-span-2 space-y-2">
+          {/* Select all header */}
+          {filteredAlarms.length > 0 && (
+            <div className="flex items-center gap-2 px-4 py-2 text-xs text-noc-muted">
+              <button onClick={toggleSelectAll} className="flex items-center gap-1 hover:text-noc-text transition-colors">
+                {selectedIds.size === filteredAlarms.length && filteredAlarms.length > 0
+                  ? <CheckSquare className="w-4 h-4 text-noc-accent" />
+                  : <Square className="w-4 h-4" />
+                }
+                全选
+              </button>
+              <span className="ml-auto">{filteredAlarms.length} 条告警</span>
+            </div>
+          )}
+
           {filteredAlarms.map((alarm) => {
-            const severityConf = getSeverityConfig(alarm.severity);
-            const statusConf = getStatusConfig(alarm.status);
-            const SeverityIcon = severityConf.icon;
-            const StatusIcon = statusConf.icon;
+            const sev = SEVERITY_CONFIG[alarm.severity as AlarmSeverity] ?? SEVERITY_CONFIG.warning;
+            const status = getAlarmStatus(alarm);
+            const sta = STATUS_CONFIG[status];
+            const SevIcon = sev.icon;
+            const StaIcon = sta.icon;
+            const isSelected = selectedAlarm?._id === alarm._id;
+            const isChecked = selectedIds.has(alarm._id);
 
             return (
               <div
-                key={alarm.id}
+                key={alarm._id}
                 onClick={() => setSelectedAlarm(alarm)}
                 className={`bg-noc-surface border rounded-lg p-4 cursor-pointer transition-all ${
-                  selectedAlarm?.id === alarm.id
-                    ? 'border-noc-accent shadow-lg'
-                    : 'border-noc-border hover:border-noc-accent/50'
+                  isSelected ? 'border-noc-accent shadow-lg' : 'border-noc-border hover:border-noc-accent/50'
                 }`}
               >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-start gap-3">
-                    <div className={`p-2 rounded-lg ${severityConf.bg}`}>
-                      <SeverityIcon className={`w-5 h-5 ${severityConf.color}`} />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-sm font-mono text-noc-muted">{alarm.id}</span>
-                        <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${statusConf.bg} ${statusConf.color} ${statusConf.border}`}
-                        >
-                          <StatusIcon className="w-3 h-3 mr-1" />
-                          {statusConf.label}
-                        </span>
-                      </div>
-                      <h3 className="text-base font-medium text-noc-text">{alarm.message}</h3>
-                      <div className="flex items-center gap-4 mt-2 text-xs text-noc-muted">
-                        <span className="flex items-center gap-1">
-                          <Server className="w-3 h-3" />
-                          {alarm.source}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Activity className="w-3 h-3" />
-                          {alarm.impactObject}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <MapPin className="w-3 h-3" />
-                          {alarm.site}
-                        </span>
-                      </div>
-                    </div>
+                <div className="flex items-start gap-3">
+                  {/* Checkbox */}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); toggleSelect(alarm._id); }}
+                    className="mt-1 flex-shrink-0"
+                  >
+                    {isChecked
+                      ? <CheckSquare className="w-4 h-4 text-noc-accent" />
+                      : <Square className="w-4 h-4 text-noc-muted" />
+                    }
+                  </button>
+
+                  {/* Severity icon */}
+                  <div className={`p-2 rounded-lg flex-shrink-0 ${sev.bg}`}>
+                    <SevIcon className={`w-5 h-5 ${sev.color}`} />
                   </div>
-                  <div className="text-right">
-                    <div className="text-xs text-noc-muted">
-                      首次: {alarm.firstOccurred}
+
+                  {/* Content */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${sta.bg} ${sta.color} ${sta.border}`}>
+                        <StaIcon className="w-3 h-3 mr-1" />
+                        {sta.label}
+                      </span>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${sev.bg} ${sev.color} ${sev.border}`}>
+                        {sev.label}
+                      </span>
                     </div>
-                    <div className="text-xs text-noc-muted mt-1">
-                      最近: {alarm.lastOccurred}
-                    </div>
-                    <div className="text-xs text-noc-muted mt-1">
-                      次数: {alarm.count}
+                    <h3 className="text-sm font-medium text-noc-text truncate">{alarm.message}</h3>
+                    <div className="flex items-center gap-4 mt-1.5 text-xs text-noc-muted">
+                      <span className="flex items-center gap-1">
+                        <Server className="w-3 h-3" />
+                        {alarm.source}
+                      </span>
+                      <span>{fmtTime(alarm.timestamp)}</span>
+                      {alarm.count > 1 && <span>次数: {alarm.count}</span>}
                     </div>
                   </div>
                 </div>
@@ -547,157 +383,120 @@ export default function AlarmCenter() {
           )}
         </div>
 
-        {/* 告警详情 */}
+        {/* Detail panel */}
         <div className="lg:col-span-1">
           {selectedAlarm ? (
             <div className="bg-noc-surface border border-noc-border rounded-lg p-6 sticky top-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold text-noc-text">告警详情</h3>
-                <span
-                  className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${
-                    getSeverityConfig(selectedAlarm.severity).bg
-                  } ${getSeverityConfig(selectedAlarm.severity).color} ${
-                    getSeverityConfig(selectedAlarm.severity).border
-                  }`}
-                >
-                  {getSeverityConfig(selectedAlarm.severity).label}
+                <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${
+                  SEVERITY_CONFIG[selectedAlarm.severity as AlarmSeverity]?.bg ?? ''
+                } ${SEVERITY_CONFIG[selectedAlarm.severity as AlarmSeverity]?.color ?? ''} ${
+                  SEVERITY_CONFIG[selectedAlarm.severity as AlarmSeverity]?.border ?? ''
+                }`}>
+                  {SEVERITY_CONFIG[selectedAlarm.severity as AlarmSeverity]?.label ?? selectedAlarm.severity}
                 </span>
               </div>
 
               <div className="space-y-4">
-                {/* 基本信息 */}
+                {/* Basic info */}
                 <div>
                   <div className="text-sm font-medium text-noc-muted mb-2">基本信息</div>
                   <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-noc-muted">告警 ID</span>
-                      <span className="text-noc-text font-mono">{selectedAlarm.id}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-noc-muted">来源</span>
-                      <span className="text-noc-text">{selectedAlarm.source}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-noc-muted">影响对象</span>
-                      <span className="text-noc-text">{selectedAlarm.impactObject}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-noc-muted">站点</span>
-                      <span className="text-noc-text">{selectedAlarm.site}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-noc-muted">负责人</span>
-                      <span className="text-noc-text">{selectedAlarm.assignee || '未分配'}</span>
-                    </div>
+                    {([
+                      ['告警 ID', selectedAlarm._id],
+                      ['来源', selectedAlarm.source],
+                      ['级别', selectedAlarm.severity],
+                      ['状态', STATUS_CONFIG[getAlarmStatus(selectedAlarm)]?.label ?? '-'],
+                      ['消息', selectedAlarm.message],
+                    ] as const).map(([k, v]) => (
+                      <div key={k} className="flex justify-between text-sm">
+                        <span className="text-noc-muted">{k}</span>
+                        <span className="text-noc-text font-mono text-right max-w-[60%] truncate">{v}</span>
+                      </div>
+                    ))}
                   </div>
                 </div>
 
-                {/* 时间信息 */}
+                {/* Time info */}
                 <div>
                   <div className="text-sm font-medium text-noc-muted mb-2">时间信息</div>
                   <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-noc-muted">首次发生</span>
-                      <span className="text-noc-text">{selectedAlarm.firstOccurred}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-noc-muted">最近发生</span>
-                      <span className="text-noc-text">{selectedAlarm.lastOccurred}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-noc-muted">发生次数</span>
-                      <span className="text-noc-text">{selectedAlarm.count}</span>
-                    </div>
+                    {([
+                      ['首次发生', fmtTime(selectedAlarm.first_occurrence || selectedAlarm.timestamp)],
+                      ['最近发生', fmtTime(selectedAlarm.timestamp)],
+                      ['发生次数', String(selectedAlarm.count)],
+                    ] as const).map(([k, v]) => (
+                      <div key={k} className="flex justify-between text-sm">
+                        <span className="text-noc-muted">{k}</span>
+                        <span className="text-noc-text">{v}</span>
+                      </div>
+                    ))}
                   </div>
                 </div>
 
-                {/* 根因分析 */}
-                {selectedAlarm.rootCause && (
+                {/* ACK info */}
+                {selectedAlarm.acknowledged && (
                   <div>
-                    <div className="text-sm font-medium text-noc-muted mb-2">根因分析</div>
-                    <div className="p-3 bg-noc-bg rounded-lg">
-                      <p className="text-sm text-noc-text">{selectedAlarm.rootCause}</p>
-                    </div>
-                  </div>
-                )}
-
-                {/* 解决方案 */}
-                {selectedAlarm.resolution && (
-                  <div>
-                    <div className="text-sm font-medium text-noc-muted mb-2">解决方案</div>
-                    <div className="p-3 bg-emerald-500/5 rounded-lg">
-                      <p className="text-sm text-noc-text">{selectedAlarm.resolution}</p>
-                    </div>
-                  </div>
-                )}
-
-                {/* 关联日志 */}
-                {selectedAlarm.relatedLogs.length > 0 && (
-                  <div>
-                    <div className="text-sm font-medium text-noc-muted mb-2">关联日志</div>
+                    <div className="text-sm font-medium text-noc-muted mb-2">确认信息</div>
                     <div className="space-y-2">
-                      {selectedAlarm.relatedLogs.map((log) => (
-                        <div key={log.id} className="p-2 bg-noc-bg rounded text-xs">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-noc-muted">{log.timestamp}</span>
-                            <span
-                              className={`px-1.5 py-0.5 rounded ${
-                                log.level === 'ERROR'
-                                  ? 'bg-red-500/10 text-red-400'
-                                  : log.level === 'WARN'
-                                  ? 'bg-amber-500/10 text-amber-400'
-                                  : 'bg-blue-500/10 text-blue-400'
-                              }`}
-                            >
-                              {log.level}
-                            </span>
-                            <span className="text-noc-muted">{log.source}</span>
-                          </div>
-                          <p className="text-noc-text font-mono">{log.message}</p>
-                        </div>
-                      ))}
+                      <div className="flex justify-between text-sm">
+                        <span className="text-noc-muted">确认人</span>
+                        <span className="text-noc-text">{selectedAlarm.ack_by || '-'}</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-noc-muted">确认时间</span>
+                        <span className="text-noc-text">{fmtTime(selectedAlarm.ack_at)}</span>
+                      </div>
                     </div>
                   </div>
                 )}
 
-                {/* 操作按钮 */}
+                {/* Clear info */}
+                {selectedAlarm.cleared && (
+                  <div>
+                    <div className="text-sm font-medium text-noc-muted mb-2">清除信息</div>
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-noc-muted">清除人</span>
+                        <span className="text-noc-text">{selectedAlarm.cleared_by || '-'}</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-noc-muted">清除时间</span>
+                        <span className="text-noc-text">{fmtTime(selectedAlarm.cleared_at)}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Actions */}
                 <div className="pt-4 border-t border-noc-border space-y-2">
-                  {selectedAlarm.status === 'active' && (
+                  {!selectedAlarm.acknowledged && !selectedAlarm.cleared && (
                     <button
-                      onClick={() => acknowledgeAlarm(selectedAlarm.id)}
+                      onClick={() => acknowledgeAlarm(selectedAlarm._id)}
                       className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-lg text-sm hover:bg-amber-500/20 transition-colors"
                     >
                       <CheckCircle className="w-4 h-4" />
                       确认告警
                     </button>
                   )}
-                  {(selectedAlarm.status === 'active' ||
-                    selectedAlarm.status === 'acknowledged') && (
-                    <button
-                      onClick={() => investigateAlarm(selectedAlarm.id)}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-lg text-sm hover:bg-blue-500/20 transition-colors"
-                    >
-                      <Search className="w-4 h-4" />
-                      开始调查
-                    </button>
-                  )}
-                  {selectedAlarm.status !== 'resolved' && selectedAlarm.status !== 'closed' && (
-                    <button
-                      onClick={() => goToFaultDiagnosis(selectedAlarm)}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-noc-accent text-white rounded-lg text-sm hover:opacity-90 transition-opacity"
-                    >
-                      <Zap className="w-4 h-4" />
-                      一键诊断
-                    </button>
-                  )}
-                  {selectedAlarm.status === 'investigating' && (
-                    <button
-                      onClick={() => resolveAlarm(selectedAlarm.id, '手动解决')}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-lg text-sm hover:bg-emerald-500/20 transition-colors"
-                    >
-                      <CheckCircle className="w-4 h-4" />
-                      标记解决
-                    </button>
+                  {!selectedAlarm.cleared && (
+                    <>
+                      <button
+                        onClick={() => navigate('/fault-diagnosis', { state: { alarmId: selectedAlarm._id, source: selectedAlarm.source, message: selectedAlarm.message } })}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-noc-accent text-white rounded-lg text-sm hover:opacity-90 transition-opacity"
+                      >
+                        <Zap className="w-4 h-4" />
+                        一键诊断
+                      </button>
+                      <button
+                        onClick={() => clearAlarm(selectedAlarm._id)}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-lg text-sm hover:bg-emerald-500/20 transition-colors"
+                      >
+                        <CheckSquare className="w-4 h-4" />
+                        清除告警
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
@@ -705,7 +504,7 @@ export default function AlarmCenter() {
           ) : (
             <div className="bg-noc-surface border border-noc-border rounded-lg p-6 text-center">
               <Bell className="w-12 h-12 text-noc-muted mx-auto mb-4" />
-              <p className="text-noc-muted">选择告警查看详情</p>
+              <p className="text-noc-muted">暂无告警数据</p>
             </div>
           )}
         </div>
