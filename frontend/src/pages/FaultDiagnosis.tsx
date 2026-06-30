@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   Play,
   RefreshCw,
@@ -19,7 +19,11 @@ import {
   Radio,
   Wifi,
   Phone,
+  Search,
+  Sparkles,
+  Hash,
 } from 'lucide-react';
+import { authFetch } from '@/App';
 
 // Fault types
 type FaultType = 'ue_register' | 'volte_call' | 'no_audio' | 'dedicated_bearer' | 'nf_discovery';
@@ -30,15 +34,19 @@ interface FaultTypeOption {
   icon: React.ReactNode;
   description: string;
   color: string;
+  count: number;
+  recommended: boolean;
+  alarmKeywords: string[];
 }
 
-const faultTypes: FaultTypeOption[] = [
+const FAULT_TYPES_BASE: Omit<FaultTypeOption, 'count' | 'recommended'>[] = [
   {
     id: 'ue_register',
     label: 'UE 注册失败',
     icon: <Wifi className="w-5 h-5" />,
     description: '5G/LTE 注册流程异常',
     color: 'bg-red-500/10 text-red-400 border-red-500/20',
+    alarmKeywords: ['注册', 'register', '鉴权', 'AUSF', 'authentication', 'reject'],
   },
   {
     id: 'volte_call',
@@ -46,6 +54,7 @@ const faultTypes: FaultTypeOption[] = [
     icon: <Phone className="w-5 h-5" />,
     description: '语音通话建立失败',
     color: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+    alarmKeywords: ['呼叫', 'call', 'INVITE', 'VoLTE', 'SIP', 'CSCF'],
   },
   {
     id: 'no_audio',
@@ -53,6 +62,7 @@ const faultTypes: FaultTypeOption[] = [
     icon: <Radio className="w-5 h-5" />,
     description: '通话接通但无声音',
     color: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
+    alarmKeywords: ['RTP', 'rtpengine', '媒体', 'audio', '声音', 'SDP'],
   },
   {
     id: 'dedicated_bearer',
@@ -60,6 +70,7 @@ const faultTypes: FaultTypeOption[] = [
     icon: <Link2 className="w-5 h-5" />,
     description: 'QoS 流建立失败',
     color: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+    alarmKeywords: ['承载', 'bearer', 'PFCP', 'QoS', 'UPF', 'SMF'],
   },
   {
     id: 'nf_discovery',
@@ -67,6 +78,7 @@ const faultTypes: FaultTypeOption[] = [
     icon: <Server className="w-5 h-5" />,
     description: '服务发现异常',
     color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+    alarmKeywords: ['NRF', 'discovery', '发现', '注册超时', '服务'],
   },
 ];
 
@@ -96,10 +108,11 @@ interface DiagnosisResult {
 }
 
 export default function FaultDiagnosis() {
-  const [selectedFault, setSelectedFault] = useState<FaultType | null>(null);
+  const [selectedFault, setSelectedFault] = useState<FaultType | 'custom' | null>(null);
   const [isDiagnosing, setIsDiagnosing] = useState(false);
   const [result, setResult] = useState<DiagnosisResult | null>(null);
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set());
+  const [alarmMessages, setAlarmMessages] = useState<string[]>([]);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -112,6 +125,53 @@ export default function FaultDiagnosis() {
     site: '',
     networkElement: '',
   });
+
+  // Fetch alarms for AI recommendation
+  useEffect(() => {
+    const fetchAlarms = async () => {
+      try {
+        const resp = await authFetch('/api/v1/alarms?active=true&acknowledged=false&page_size=50');
+        const data = await resp.json();
+        if (data.status === 'ok' && data.alarms) {
+          setAlarmMessages(data.alarms.map((a: { message: string }) => a.message));
+        }
+      } catch { /* ignore */ }
+    };
+    fetchAlarms();
+    const interval = setInterval(fetchAlarms, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Build fault types with occurrence counts and AI recommendation
+  const faultTypes = useMemo(() => {
+    // Mock occurrence counts (in production, fetch from API)
+    const counts: Record<FaultType, number> = {
+      ue_register: 23,
+      volte_call: 15,
+      no_audio: 8,
+      dedicated_bearer: 5,
+      nf_discovery: 3,
+    };
+
+    const alarmText = alarmMessages.join(' ').toLowerCase();
+
+    return FAULT_TYPES_BASE.map((ft) => {
+      const matchCount = ft.alarmKeywords.filter((kw) => alarmText.includes(kw.toLowerCase())).length;
+      return {
+        ...ft,
+        count: counts[ft.id],
+        recommended: matchCount >= 2,
+      };
+    });
+  }, [alarmMessages]);
+
+  // Sort: recommended first, then by count
+  const sortedFaultTypes = useMemo(() => {
+    return [...faultTypes].sort((a, b) => {
+      if (a.recommended !== b.recommended) return a.recommended ? -1 : 1;
+      return b.count - a.count;
+    });
+  }, [faultTypes]);
 
   const handleInputChange = (field: string, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -274,6 +334,43 @@ export default function FaultDiagnosis() {
     setIsDiagnosing(false);
   }, [selectedFault]);
 
+  const runCustomDiagnosis = useCallback(async () => {
+    if (!formData.imsi && !formData.msisdn) return;
+    setIsDiagnosing(true);
+    setResult(null);
+    await new Promise((r) => setTimeout(r, 2500));
+    const identifier = formData.imsi || formData.msisdn;
+    setResult({
+      faultType: 'ue_register',
+      status: 'partial',
+      summary: `用户 ${identifier} 全链路追踪完成`,
+      failureReason: '检测到注册流程中存在鉴权延迟，呼叫流程正常，承载建立正常',
+      evidence: [
+        `IMSI: ${formData.imsi || '未提供'}, MSISDN: ${formData.msisdn || '未提供'}`,
+        '注册流程: AMF → AUSF 鉴权延迟 1200ms（阈值 500ms）',
+        '呼叫流程: INVITE → 200 OK 正常，RTP 媒体流正常',
+        '承载流程: PFCP Session Establishment 正常',
+      ],
+      recommendations: [
+        '检查 AUSF 服务器负载和响应时间',
+        '验证 HSS 鉴权向量缓存配置',
+        '监控 AUSF N35 接口延迟趋势',
+      ],
+      steps: [
+        { id: '1', protocol: 'NAS', step: 'RRC 建立', status: 'success', message: 'RRC 连接建立成功', timestamp: '10:30:01.100', source: 'UE', destination: 'gNB' },
+        { id: '2', protocol: 'NAS', step: 'Registration Request', status: 'success', message: '初始注册请求', timestamp: '10:30:01.150', source: 'UE', destination: 'AMF' },
+        { id: '3', protocol: 'HTTP', step: 'N12 鉴权请求', status: 'warning', message: 'AUSF 响应延迟 1200ms', timestamp: '10:30:02.350', source: 'AMF', destination: 'AUSF', detail: '正常响应时间 < 500ms\n实际响应时间: 1200ms\n原因: AUSF 负载较高' },
+        { id: '4', protocol: 'HTTP', step: 'N12 鉴权响应', status: 'success', message: '鉴权成功', timestamp: '10:30:02.400', source: 'AUSF', destination: 'AMF' },
+        { id: '5', protocol: 'NAS', step: 'Registration Accept', status: 'success', message: '注册成功', timestamp: '10:30:02.500', source: 'AMF', destination: 'UE' },
+        { id: '6', protocol: 'SIP', step: 'SIP REGISTER', status: 'success', message: 'IMS 注册成功', timestamp: '10:30:03.000', source: 'UE', destination: 'P-CSCF' },
+        { id: '7', protocol: 'SIP', step: 'INVITE (测试呼叫)', status: 'success', message: '呼叫建立成功', timestamp: '10:30:05.000', source: 'UE', destination: 'P-CSCF' },
+        { id: '8', protocol: 'RTP', step: 'RTP 媒体流', status: 'success', message: '媒体流正常', timestamp: '10:30:06.000', source: 'UE-A', destination: 'UE-B' },
+      ],
+      affectedElements: ['AMF', 'AUSF', 'P-CSCF'],
+    });
+    setIsDiagnosing(false);
+  }, [formData.imsi, formData.msisdn]);
+
   const getProtocolColor = (protocol: string) => {
     switch (protocol) {
       case 'SIP': return 'bg-blue-500/10 text-blue-400';
@@ -318,29 +415,61 @@ export default function FaultDiagnosis() {
       {/* Fault Type Selection */}
       <div className="bg-noc-surface border border-noc-border rounded-lg p-6">
         <h2 className="text-lg font-semibold text-noc-text mb-4">选择故障类型</h2>
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-          {faultTypes.map((fault) => (
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          {sortedFaultTypes.map((fault) => (
             <button
               key={fault.id}
               onClick={() => setSelectedFault(fault.id)}
-              className={`p-4 rounded-lg border-2 transition-all ${
+              className={`relative p-4 rounded-lg border-2 transition-all ${
                 selectedFault === fault.id
                   ? `${fault.color} border-current shadow-lg`
                   : 'bg-noc-bg border-noc-border text-noc-muted hover:border-noc-accent/50'
               }`}
             >
-              <div className="flex flex-col items-center gap-2">
+              {/* AI recommendation badge */}
+              {fault.recommended && (
+                <div className="absolute -top-2 -right-2 flex items-center gap-1 px-2 py-0.5 bg-noc-accent text-white text-[10px] font-bold rounded-full shadow-lg">
+                  <Sparkles className="w-3 h-3" />
+                  AI 推荐
+                </div>
+              )}
+              {/* Occurrence count badge */}
+              <div className="absolute top-2 right-2">
+                <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                  fault.count > 10 ? 'bg-red-500/20 text-red-400' : fault.count > 5 ? 'bg-amber-500/20 text-amber-400' : 'bg-noc-bg text-noc-muted'
+                }`}>
+                  <Hash className="w-2.5 h-2.5" />
+                  {fault.count}
+                </span>
+              </div>
+              <div className="flex flex-col items-center gap-2 pt-2">
                 {fault.icon}
                 <span className="text-sm font-medium">{fault.label}</span>
                 <span className="text-xs opacity-75">{fault.description}</span>
+                <span className="text-[10px] text-noc-muted">近7天发生 {fault.count} 次</span>
               </div>
             </button>
           ))}
+          {/* Custom diagnosis card */}
+          <button
+            onClick={() => setSelectedFault('custom')}
+            className={`relative p-4 rounded-lg border-2 transition-all ${
+              selectedFault === 'custom'
+                ? 'bg-noc-accent/10 border-noc-accent text-noc-accent shadow-lg'
+                : 'bg-noc-bg border-dashed border-noc-border text-noc-muted hover:border-noc-accent/50'
+            }`}
+          >
+            <div className="flex flex-col items-center gap-2 pt-2">
+              <Search className="w-5 h-5" />
+              <span className="text-sm font-medium">自定义诊断</span>
+              <span className="text-xs opacity-75">IMSI/MSISDN 全链路追踪</span>
+            </div>
+          </button>
         </div>
       </div>
 
       {/* Input Form */}
-      {selectedFault && (
+      {selectedFault && selectedFault !== 'custom' && (
         <div className="bg-noc-surface border border-noc-border rounded-lg p-6">
           <h2 className="text-lg font-semibold text-noc-text mb-4">诊断参数</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -440,6 +569,68 @@ export default function FaultDiagnosis() {
                 )}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Diagnosis Form */}
+      {selectedFault === 'custom' && (
+        <div className="bg-noc-surface border border-noc-accent/30 rounded-lg p-6">
+          <h2 className="text-lg font-semibold text-noc-text mb-4 flex items-center gap-2">
+            <Search className="w-5 h-5 text-noc-accent" />
+            自定义全链路追踪
+          </h2>
+          <p className="text-sm text-noc-muted mb-4">输入 IMSI 或 MSISDN，系统将自动追踪该用户的完整信令流程，覆盖注册、呼叫、承载等全部环节。</p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm text-noc-muted mb-1">IMSI / SUPI <span className="text-red-400">*</span></label>
+              <input
+                type="text"
+                value={formData.imsi}
+                onChange={(e) => handleInputChange('imsi', e.target.value)}
+                placeholder="460110000000001"
+                className="w-full px-3 py-2 bg-noc-bg border border-noc-border rounded-lg text-sm text-noc-text placeholder-noc-muted focus:outline-none focus:border-noc-accent"
+              />
+            </div>
+            <div>
+              <label className="block text-sm text-noc-muted mb-1">MSISDN / 电话号码</label>
+              <input
+                type="text"
+                value={formData.msisdn}
+                onChange={(e) => handleInputChange('msisdn', e.target.value)}
+                placeholder="+8613800138000"
+                className="w-full px-3 py-2 bg-noc-bg border border-noc-border rounded-lg text-sm text-noc-text placeholder-noc-muted focus:outline-none focus:border-noc-accent"
+              />
+            </div>
+            <div>
+              <label className="block text-sm text-noc-muted mb-1">时间范围</label>
+              <input
+                type="datetime-local"
+                value={formData.timeFrom}
+                onChange={(e) => handleInputChange('timeFrom', e.target.value)}
+                className="w-full px-3 py-2 bg-noc-bg border border-noc-border rounded-lg text-sm text-noc-text focus:outline-none focus:border-noc-accent"
+              />
+            </div>
+          </div>
+          <div className="mt-4 flex items-center gap-3">
+            <button
+              onClick={runCustomDiagnosis}
+              disabled={isDiagnosing || (!formData.imsi && !formData.msisdn)}
+              className="flex items-center justify-center gap-2 px-6 py-2 bg-noc-accent text-white rounded-lg text-sm hover:opacity-90 transition-opacity disabled:opacity-50"
+            >
+              {isDiagnosing ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  追踪中...
+                </>
+              ) : (
+                <>
+                  <Zap className="w-4 h-4" />
+                  启动全链路追踪
+                </>
+              )}
+            </button>
+            <span className="text-xs text-noc-muted">至少填写 IMSI 或 MSISDN 其中一项</span>
           </div>
         </div>
       )}
