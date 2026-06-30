@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Server,
@@ -10,10 +10,10 @@ import {
   Settings,
   RefreshCw,
   ChevronDown,
+  ChevronRight,
   Users,
   RotateCcw,
   FileText,
-  Terminal,
 } from 'lucide-react';
 import SummaryCard from '@/components/SummaryCard';
 import { formatBytes, formatPercent } from '@/utils/format';
