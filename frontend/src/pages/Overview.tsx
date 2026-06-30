@@ -50,30 +50,6 @@ export default function Overview() {
   const [criticalAlarms, setCriticalAlarms] = useState<Array<{id: string; source: string; message: string; severity: string; timestamp: string}>>([]);
   const [restarting, setRestarting] = useState<string | null>(null);
 
-  // 重启网元
-  const restartNF = useCallback(async (name: string) => {
-    if (!confirm(`确认重启 ${name}？`)) return;
-    setRestarting(name);
-    try {
-      const resp = await authFetch('/api/v1/mml/execute', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: `CTRL-NF: NAME=${name}, ACTION=restart;` }),
-      });
-      const data = await resp.json();
-      if (data.status === 'ok') {
-        // 等待几秒后刷新状态
-        setTimeout(() => { fetchDeploymentStatus(); setRestarting(null); }, 3000);
-      } else {
-        alert(`重启失败: ${data.message || '未知错误'}`);
-        setRestarting(null);
-      }
-    } catch {
-      alert('重启请求发送失败');
-      setRestarting(null);
-    }
-  }, [fetchDeploymentStatus]);
-
   // 获取部署模板列表
   const fetchTemplates = useCallback(async () => {
     try {
@@ -104,6 +80,52 @@ export default function Overview() {
     } catch { /* ignore */ }
   }, []);
 
+  // HTTP 轮询作为备用（当 WebSocket 断开时）
+  const fetchDeploymentStatus = useCallback(async () => {
+    if (wsStatus === 'CONNECTED') return;
+
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await authFetch('/api/v1/deployment/status');
+      const data = await response.json();
+      if (data.status === 'ok') {
+        setDeploymentStatus(data.data);
+        setCurrentTemplate(data.data.template || 'auto');
+      } else {
+        setError(data.message || 'Failed to fetch deployment status');
+      }
+    } catch (err) {
+      setError('Failed to fetch deployment status');
+      console.error('Error fetching deployment status:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [wsStatus]);
+
+  // 重启网元
+  const restartNF = useCallback(async (name: string) => {
+    if (!confirm(`确认重启 ${name}？`)) return;
+    setRestarting(name);
+    try {
+      const resp = await authFetch('/api/v1/mml/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: `CTRL-NF: NAME=${name}, ACTION=restart;` }),
+      });
+      const data = await resp.json();
+      if (data.status === 'ok') {
+        setTimeout(() => { fetchDeploymentStatus(); setRestarting(null); }, 3000);
+      } else {
+        alert(`重启失败: ${data.message || '未知错误'}`);
+        setRestarting(null);
+      }
+    } catch {
+      alert('重启请求发送失败');
+      setRestarting(null);
+    }
+  }, [fetchDeploymentStatus]);
+
   // WebSocket 数据同步
   useEffect(() => {
     if (wsDeploymentStatus) {
@@ -124,29 +146,6 @@ export default function Overview() {
       setBusinessMetrics(wsBusinessMetrics);
     }
   }, [wsBusinessMetrics]);
-
-  // HTTP 轮询作为备用（当 WebSocket 断开时）
-  const fetchDeploymentStatus = useCallback(async () => {
-    if (wsStatus === 'CONNECTED') return; // WebSocket 已连接，跳过 HTTP 轮询
-
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await authFetch('/api/v1/deployment/status');
-      const data = await response.json();
-      if (data.status === 'ok') {
-        setDeploymentStatus(data.data);
-        setCurrentTemplate(data.data.template || 'auto');
-      } else {
-        setError(data.message || 'Failed to fetch deployment status');
-      }
-    } catch (err) {
-      setError('Failed to fetch deployment status');
-      console.error('Error fetching deployment status:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, [wsStatus]);
 
   // 切换部署模板
   const switchTemplate = useCallback(async (templateName: string) => {
