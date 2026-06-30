@@ -16,14 +16,26 @@ import {
   Lightbulb,
   Target,
   BarChart3,
+  Zap,
+  ArrowRight,
+  X,
+  ShieldCheck,
 } from 'lucide-react';
 
 // Incident interfaces
+interface FixAction {
+  id: string;
+  label: string;
+  command: string;
+  description: string;
+}
+
 interface RootCause {
   id: string;
   description: string;
   confidence: number;
   evidence: string[];
+  fixActions: FixAction[];
 }
 
 interface RecommendedAction {
@@ -64,6 +76,10 @@ export default function FaultResolution() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [activeFix, setActiveFix] = useState<{ causeId: string; fix: FixAction } | null>(null);
+  const [fixResult, setFixResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [verifying, setVerifying] = useState(false);
+  const [showFixModal, setShowFixModal] = useState(false);
 
   const fetchIncidents = useCallback(async () => {
     setLoading(true);
@@ -92,6 +108,10 @@ export default function FaultResolution() {
                 '抓包显示 RTP 包发送到 10.0.0.1 而非实际 UE IP',
                 'rtpengine_sock 配置中 interface 参数不匹配',
               ],
+              fixActions: [
+                { id: 'f1', label: '修复 interface 参数', command: 'sed -i "s/interface=pub/interface=priv/" /etc/rtpengine/rtpengine.conf && systemctl restart rtpengine', description: '修改 rtpengine_sock 的 interface 参数并重启服务' },
+                { id: 'f2', label: '重载 RTPENGINE 配置', command: 'rtpengine-ctl reload', description: '热重载 RTPENGINE 配置（不中断通话）' },
+              ],
             },
             {
               id: '2',
@@ -102,6 +122,9 @@ export default function FaultResolution() {
                 'P-CSCF 路由配置中 route[NATMANAGE] 规则异常',
                 'Contact / Route Header 处理逻辑问题',
               ],
+              fixActions: [
+                { id: 'f3', label: '修复 NATMANAGE 路由', command: 'kamcmd cfg.set route[NATMANAGE] "fix_nated_contact(); rtpproxy_manage();" && kamcmd xlog.reload', description: '修正 P-CSCF 的 NATMANAGE 路由规则' },
+              ],
             },
             {
               id: '3',
@@ -111,6 +134,9 @@ export default function FaultResolution() {
                 'IPsec SA 建立成功但路由未正确配置',
                 '被叫侧 P-CSCF 返回的 Contact 地址错误',
                 'IPsec 策略与 RTP 路由冲突',
+              ],
+              fixActions: [
+                { id: 'f4', label: '重建 IPsec SA', command: 'ip xfrm state flush && ip xfrm policy flush && kamcmd ipsec.reload', description: '清除并重建所有 IPsec 安全关联' },
               ],
             },
           ],
@@ -205,6 +231,10 @@ export default function FaultResolution() {
                 'N12 接口返回 401 Unauthorized',
                 'UDM/ARPF 接口超时',
               ],
+              fixActions: [
+                { id: 'f5', label: '重启 AUSF 服务', command: 'systemctl restart ausfd', description: '重启 AUSF 服务以恢复 N35 接口连接' },
+                { id: 'f6', label: '检查 UDM 连接', command: 'curl -s http://localhost:8088/api/v1/mml/execute -d \'{"command":"PING-UDM:;"}\'', description: '测试 UDM/ARPF 接口连通性' },
+              ],
             },
           ],
           recommendations: [
@@ -252,6 +282,9 @@ export default function FaultResolution() {
                 'UPF 日志: 资源不足',
                 'PFCP Session Establishment Response 返回拒绝',
                 'QER 配置超出限制',
+              ],
+              fixActions: [
+                { id: 'f7', label: '扩展 UPF 资源配额', command: 'upf-cli set-max-sessions 50000 && systemctl restart upfd', description: '将 UPF 最大会话数从 30000 扩展到 50000' },
               ],
             },
           ],
@@ -368,6 +401,68 @@ export default function FaultResolution() {
       case 'restart': return <RefreshCw className="w-4 h-4" />;
     }
   };
+
+  // ---- Fix / Verify workflow ----
+  const handleApplyFix = (causeId: string, fix: FixAction) => {
+    setActiveFix({ causeId, fix });
+    setFixResult(null);
+    setShowFixModal(true);
+  };
+
+  const executeFix = async () => {
+    if (!activeFix) return;
+    setFixResult(null);
+    // Simulate fix execution
+    await new Promise((r) => setTimeout(r, 1500));
+    setFixResult({ success: true, message: `修复方案「${activeFix.fix.label}」已执行成功` });
+  };
+
+  const handleVerify = async () => {
+    setVerifying(true);
+    // Simulate verification
+    await new Promise((r) => setTimeout(r, 2000));
+    setVerifying(false);
+    // Update incident status
+    if (selectedIncident) {
+      const updated = { ...selectedIncident, status: 'resolved' as const, updatedAt: new Date().toISOString().slice(0, 19).replace('T', ' ') };
+      updated.timeline = [...updated.timeline, {
+        id: String(updated.timeline.length + 1),
+        timestamp: new Date().toISOString().slice(0, 19).replace('T', ' '),
+        user: '系统',
+        action: '修复验证通过',
+        detail: `已验证修复方案「${activeFix?.fix.label}」生效，故障已恢复`,
+      }];
+      setIncidents((prev) => prev.map((inc) => inc.id === updated.id ? updated : inc));
+      setSelectedIncident(updated);
+    }
+    setShowFixModal(false);
+    setActiveFix(null);
+    setFixResult(null);
+  };
+
+  const handleCloseTicket = () => {
+    if (!selectedIncident) return;
+    const updated = { ...selectedIncident, status: 'closed' as const, updatedAt: new Date().toISOString().slice(0, 19).replace('T', ' ') };
+    updated.timeline = [...updated.timeline, {
+      id: String(updated.timeline.length + 1),
+      timestamp: new Date().toISOString().slice(0, 19).replace('T', ' '),
+      user: '系统',
+      action: '工单关闭',
+      detail: '故障已修复并验证，工单关闭',
+    }];
+    setIncidents((prev) => prev.map((inc) => inc.id === updated.id ? updated : inc));
+    setSelectedIncident(updated);
+  };
+
+  // Status flow steps
+  const STATUS_STEPS: { key: string; label: string; icon: typeof Clock }[] = [
+    { key: 'open', label: '待处理', icon: Clock },
+    { key: 'investigating', label: '处理中', icon: Play },
+    { key: 'resolved', label: '已解决', icon: CheckCircle },
+    { key: 'closed', label: '已关闭', icon: Pause },
+  ];
+
+  const statusIndex = STATUS_STEPS.findIndex((s) => s.key === selectedIncident?.status);
 
   if (loading) {
     return (
@@ -511,6 +606,32 @@ export default function FaultResolution() {
               </div>
             </div>
 
+            {/* Status Flow Stepper */}
+            <div className="bg-noc-surface border border-noc-border rounded-lg p-4">
+              <div className="flex items-center justify-between">
+                {STATUS_STEPS.map((step, i) => {
+                  const StepIcon = step.icon;
+                  const isActive = i === statusIndex;
+                  const isDone = i < statusIndex;
+                  return (
+                    <div key={step.key} className="flex items-center flex-1 last:flex-none">
+                      <div className={`flex items-center gap-2 ${isActive ? 'text-noc-accent' : isDone ? 'text-emerald-400' : 'text-noc-muted'}`}>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-all ${
+                          isActive ? 'border-noc-accent bg-noc-accent/10 animate-pulse' : isDone ? 'border-emerald-400 bg-emerald-400/10' : 'border-noc-border bg-noc-bg'
+                        }`}>
+                          {isDone ? <CheckCircle className="w-4 h-4" /> : <StepIcon className="w-4 h-4" />}
+                        </div>
+                        <span className="text-xs font-medium hidden md:inline">{step.label}</span>
+                      </div>
+                      {i < STATUS_STEPS.length - 1 && (
+                        <div className={`flex-1 h-0.5 mx-2 ${i < statusIndex ? 'bg-emerald-400' : 'bg-noc-border'}`} />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
             {/* Root Cause Candidates */}
             <div className="bg-noc-surface border border-noc-border rounded-lg p-6">
               <h3 className="text-base font-semibold text-noc-text mb-4 flex items-center gap-2">
@@ -535,7 +656,7 @@ export default function FaultResolution() {
                         <span className="text-xs text-noc-muted">置信度</span>
                       </div>
                     </div>
-                    <div className="p-4 space-y-2">
+                    <div className="p-4 space-y-3">
                       <div className="text-xs text-noc-muted font-medium">证据：</div>
                       {cause.evidence.map((evidence, evidenceIndex) => (
                         <div key={evidenceIndex} className="flex items-start gap-2 text-sm text-noc-text">
@@ -545,6 +666,28 @@ export default function FaultResolution() {
                           <span className="font-mono text-xs">{evidence}</span>
                         </div>
                       ))}
+                      {/* One-click fix buttons */}
+                      {cause.fixActions && cause.fixActions.length > 0 && selectedIncident?.status !== 'closed' && (
+                        <div className="pt-2 border-t border-noc-border space-y-2">
+                          <div className="text-xs text-noc-muted font-medium flex items-center gap-1">
+                            <Zap className="w-3 h-3" /> 一键修复：
+                          </div>
+                          {cause.fixActions.map((fix) => (
+                            <button
+                              key={fix.id}
+                              onClick={() => handleApplyFix(cause.id, fix)}
+                              className="w-full flex items-center gap-3 px-3 py-2 bg-noc-accent/5 hover:bg-noc-accent/10 border border-noc-accent/20 rounded-lg text-left transition-colors group"
+                            >
+                              <Wrench className="w-4 h-4 text-noc-accent flex-shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm text-noc-text font-medium">{fix.label}</div>
+                                <div className="text-xs text-noc-muted truncate">{fix.description}</div>
+                              </div>
+                              <ArrowRight className="w-4 h-4 text-noc-muted group-hover:text-noc-accent transition-colors flex-shrink-0" />
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -586,30 +729,121 @@ export default function FaultResolution() {
                 处置时间线
               </h3>
               <div className="space-y-4">
-                {selectedIncident.timeline.map((event, index) => (
-                  <div key={event.id} className="flex gap-4">
-                    <div className="flex flex-col items-center">
-                      <div className="w-3 h-3 rounded-full bg-noc-accent" />
-                      {index < selectedIncident.timeline.length - 1 && (
-                        <div className="w-0.5 flex-1 bg-noc-border" />
-                      )}
-                    </div>
-                    <div className="flex-1 pb-4">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-xs text-noc-muted">{event.timestamp}</span>
-                        <span className="text-xs font-medium text-noc-text">{event.user}</span>
+                {selectedIncident.timeline.map((event, index) => {
+                  const isOpen = event.action.includes('创建');
+                  const isResolved = event.action.includes('解决') || event.action.includes('验证');
+                  const isClosed = event.action.includes('关闭');
+                  const dotColor = isClosed ? 'bg-slate-400' : isResolved ? 'bg-emerald-400' : isOpen ? 'bg-gray-400' : 'bg-noc-accent';
+                  return (
+                    <div key={event.id} className="flex gap-4">
+                      <div className="flex flex-col items-center">
+                        <div className={`w-3 h-3 rounded-full ${dotColor}`} />
+                        {index < selectedIncident.timeline.length - 1 && (
+                          <div className="w-0.5 flex-1 bg-noc-border" />
+                        )}
                       </div>
-                      <div className="text-sm text-noc-text">{event.action}</div>
-                      {event.detail && (
-                        <div className="mt-1 text-xs text-noc-muted bg-noc-bg p-2 rounded">
-                          {event.detail}
+                      <div className="flex-1 pb-4">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xs text-noc-muted">{event.timestamp}</span>
+                          <span className="text-xs font-medium text-noc-text">{event.user}</span>
+                        </div>
+                        <div className="text-sm text-noc-text">{event.action}</div>
+                        {event.detail && (
+                          <div className="mt-1 text-xs text-noc-muted bg-noc-bg p-2 rounded">
+                            {event.detail}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Close ticket button */}
+            {selectedIncident.status === 'resolved' && (
+              <div className="flex justify-end">
+                <button
+                  onClick={handleCloseTicket}
+                  className="flex items-center gap-2 px-4 py-2 bg-slate-500/10 text-slate-400 border border-slate-500/20 rounded-lg text-sm hover:bg-slate-500/20 transition-colors"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  确认关闭工单
+                </button>
+              </div>
+            )}
+
+            {/* Fix Modal */}
+            {showFixModal && activeFix && (
+              <>
+                <div className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm" onClick={() => { setShowFixModal(false); setActiveFix(null); setFixResult(null); }} />
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                  <div className="bg-noc-surface border border-noc-border rounded-xl shadow-2xl w-full max-w-lg">
+                    {/* Modal header */}
+                    <div className="flex items-center justify-between px-6 py-4 border-b border-noc-border">
+                      <div className="flex items-center gap-2">
+                        <Zap className="w-5 h-5 text-noc-accent" />
+                        <h3 className="text-lg font-semibold text-noc-text">一键修复</h3>
+                      </div>
+                      <button onClick={() => { setShowFixModal(false); setActiveFix(null); setFixResult(null); }} className="p-1 text-noc-muted hover:text-noc-text">
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+                    {/* Modal body */}
+                    <div className="px-6 py-4 space-y-4">
+                      <div>
+                        <div className="text-sm text-noc-muted mb-1">修复方案</div>
+                        <div className="text-base font-medium text-noc-text">{activeFix.fix.label}</div>
+                        <div className="text-xs text-noc-muted mt-1">{activeFix.fix.description}</div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-noc-muted mb-1">执行命令</div>
+                        <code className="block w-full p-3 bg-noc-bg border border-noc-border rounded-lg text-xs font-mono text-noc-text break-all">
+                          {activeFix.fix.command}
+                        </code>
+                      </div>
+                      {!fixResult && (
+                        <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3">
+                          <div className="text-xs text-amber-400 font-medium">⚠ 注意</div>
+                          <div className="text-xs text-noc-muted mt-1">此操作将直接修改生产配置并可能重启服务，请确认后执行。</div>
+                        </div>
+                      )}
+                      {fixResult && (
+                        <div className={`border rounded-lg p-3 ${fixResult.success ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-red-500/10 border-red-500/20'}`}>
+                          <div className={`text-xs font-medium ${fixResult.success ? 'text-emerald-400' : 'text-red-400'}`}>
+                            {fixResult.success ? '✓ 执行成功' : '✗ 执行失败'}
+                          </div>
+                          <div className="text-xs text-noc-muted mt-1">{fixResult.message}</div>
                         </div>
                       )}
                     </div>
+                    {/* Modal footer */}
+                    <div className="px-6 py-4 border-t border-noc-border flex items-center gap-3 justify-end">
+                      {!fixResult ? (
+                        <>
+                          <button onClick={() => { setShowFixModal(false); setActiveFix(null); }} className="px-4 py-2 text-sm text-noc-muted hover:text-noc-text transition-colors">
+                            取消
+                          </button>
+                          <button onClick={executeFix} className="flex items-center gap-2 px-4 py-2 bg-noc-accent text-white rounded-lg text-sm hover:opacity-90 transition-opacity">
+                            <Play className="w-4 h-4" />
+                            执行修复
+                          </button>
+                        </>
+                      ) : fixResult.success ? (
+                        <button onClick={handleVerify} disabled={verifying} className="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-white rounded-lg text-sm hover:opacity-90 transition-opacity disabled:opacity-50">
+                          {verifying ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                          {verifying ? '验证中...' : '验证并关闭'}
+                        </button>
+                      ) : (
+                        <button onClick={() => { setShowFixModal(false); setActiveFix(null); setFixResult(null); }} className="px-4 py-2 text-sm text-noc-muted hover:text-noc-text transition-colors">
+                          关闭
+                        </button>
+                      )}
+                    </div>
                   </div>
-                ))}
-              </div>
-            </div>
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>
