@@ -102,7 +102,7 @@ func getAllComponents() []ComponentConfig {
 		{Name: "nrfd", ProcessName: "nrfd", Required: true, Enabled: true, Category: "5G Core", Desc: "Network Repository Function"},
 		{Name: "smfd", ProcessName: "smfd", Required: true, Enabled: true, Category: "5G Core", Desc: "Session Management Function"},
 		{Name: "upfd", ProcessName: "upfd", Required: true, Enabled: true, Category: "5G Core", Desc: "User Plane Function"},
-		{Name: "pcfd", ProcessName: "pcfd", Required: false, Enabled: true, Category: "5G Core", Desc: "Policy Control Function"},
+		{Name: "pcfd", ProcessName: "pcfd", Required: true, Enabled: true, Category: "5G Core", Desc: "Policy Control Function"},
 		{Name: "udmd", ProcessName: "udmd", Required: true, Enabled: true, Category: "5G Core", Desc: "Unified Data Management"},
 		{Name: "udrd", ProcessName: "udrd", Required: true, Enabled: true, Category: "5G Core", Desc: "Unified Data Repository"},
 
@@ -122,11 +122,11 @@ func getAllComponents() []ComponentConfig {
 		{Name: "imsHss", ProcessName: "java", MatchPatterns: []string{"HSSContainer", "imsHss", "FHoSS"}, Required: false, Enabled: true, Category: "IMS", Desc: "IMS Home Subscriber Server (Java)"},
 
 		// 辅助组件
-		{Name: "bsfd", ProcessName: "bsfd", Required: false, Enabled: true, Category: "Support", Desc: "Binding Support Function"},
+		{Name: "bsfd", ProcessName: "bsfd", Required: false, Enabled: true, Category: "5G Core", Desc: "Binding Support Function"},
 		{Name: "drad", ProcessName: "drad", Required: false, Enabled: true, Category: "Support", Desc: "Data Repository Access"},
-		{Name: "ocsd", ProcessName: "ocsd", Required: false, Enabled: true, Category: "Support", Desc: "Online Charging System"},
-		{Name: "scpd", ProcessName: "scpd", Required: false, Enabled: true, Category: "Support", Desc: "Service Capability Platform"},
-		{Name: "pcrfd", ProcessName: "pcrfd", Required: false, Enabled: true, Category: "EPC", Desc: "Policy and Charging Rules Function"},
+		{Name: "ocsd", ProcessName: "ocsd", Required: false, Enabled: true, Category: "4G/EPC", Desc: "Online Charging System"},
+		{Name: "scpd", ProcessName: "scpd", Required: false, Enabled: true, Category: "5G Core", Desc: "Service Capability Platform"},
+		{Name: "pcrfd", ProcessName: "pcrfd", Required: false, Enabled: true, Category: "4G/EPC", Desc: "Policy and Charging Rules Function"},
 	}
 }
 

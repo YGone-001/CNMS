@@ -239,7 +239,7 @@ export default function Overview() {
       if (!groups[cat]) groups[cat] = [];
       groups[cat].push(proc);
     });
-    const order = ['5G Core', '4G/EPC', 'IMS', 'EPC', 'Support'];
+    const order = ['5G Core', '4G/EPC', 'IMS', 'Support'];
     return Object.entries(groups).sort(([a], [b]) => (order.indexOf(a) === -1 ? 99 : order.indexOf(a)) - (order.indexOf(b) === -1 ? 99 : order.indexOf(b)));
   }, [processes, statusFilter]);
 
