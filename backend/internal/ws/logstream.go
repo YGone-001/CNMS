@@ -413,6 +413,7 @@ func (lsh *LogStreamHandler) GetLogFiles(w http.ResponseWriter, r *http.Request)
 	seen := make(map[string]bool)
 
 	for _, dir := range lsh.allLogDirs() {
+		dirBase := filepath.Base(dir)
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			continue
@@ -440,11 +441,21 @@ func (lsh *LogStreamHandler) GetLogFiles(w http.ResponseWriter, r *http.Request)
 				}
 			} else if strings.HasSuffix(e.Name(), ".log") {
 				name := strings.TrimSuffix(e.Name(), ".log")
+				// 日期格式日志(如 hss-2026-06-30.log): 去日期后若与其他目录文件冲突, 用目录名
+				if idx := strings.LastIndex(name, "-20"); idx > 0 {
+					stripped := name[:idx]
+					if seen[stripped] {
+						name = dirBase
+					} else {
+						name = stripped
+					}
+				}
 				path := filepath.Join(dir, e.Name())
 				if seen[path] {
 					continue
 				}
 				seen[path] = true
+				seen[name] = true // 标记名称已使用, 后续同名文件用目录名
 				info, _ := e.Info()
 				files = append(files, LogStreamStats{
 					Name:    name,
