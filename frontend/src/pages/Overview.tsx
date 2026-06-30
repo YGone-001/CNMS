@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Server,
   CheckCircle,
@@ -30,6 +31,7 @@ interface BusinessMetrics {
 
 // 概览仪表盘页面
 export default function Overview() {
+  const navigate = useNavigate();
   // 使用统一 WebSocket 获取实时数据
   const {
     wsStatus,
@@ -46,6 +48,31 @@ export default function Overview() {
   const [showTemplateMenu, setShowTemplateMenu] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string | null>(null); // 状态过滤条件
   const [criticalAlarms, setCriticalAlarms] = useState<Array<{id: string; source: string; message: string; severity: string; timestamp: string}>>([]);
+  const [restarting, setRestarting] = useState<string | null>(null);
+
+  // 重启网元
+  const restartNF = useCallback(async (name: string) => {
+    if (!confirm(`确认重启 ${name}？`)) return;
+    setRestarting(name);
+    try {
+      const resp = await authFetch('/api/v1/mml/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: `CTRL-NF: NAME=${name}, ACTION=restart;` }),
+      });
+      const data = await resp.json();
+      if (data.status === 'ok') {
+        // 等待几秒后刷新状态
+        setTimeout(() => { fetchDeploymentStatus(); setRestarting(null); }, 3000);
+      } else {
+        alert(`重启失败: ${data.message || '未知错误'}`);
+        setRestarting(null);
+      }
+    } catch {
+      alert('重启请求发送失败');
+      setRestarting(null);
+    }
+  }, [fetchDeploymentStatus]);
 
   // 获取部署模板列表
   const fetchTemplates = useCallback(async () => {
@@ -545,23 +572,11 @@ export default function Overview() {
                         <span className="text-sm text-noc-muted">{proc.description}</span>
                       </td>
                       <td className="px-6 py-4">
-                        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex items-center justify-end gap-1">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              // TODO: 实现重启功能
-                              alert(`重启 ${proc.name}`);
-                            }}
-                            className="p-1.5 rounded-md text-noc-muted hover:text-amber-400 hover:bg-amber-500/10 transition-colors"
-                            title="重启"
-                          >
-                            <RotateCcw className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              // TODO: 实现查看日志功能
-                              alert(`查看 ${proc.name} 日志`);
+                              navigate(`/logs?source=${proc.name}`);
                             }}
                             className="p-1.5 rounded-md text-noc-muted hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
                             title="查看日志"
@@ -571,13 +586,13 @@ export default function Overview() {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              // TODO: 实现终端功能
-                              alert(`进入 ${proc.name} 终端`);
+                              restartNF(proc.name);
                             }}
-                            className="p-1.5 rounded-md text-noc-muted hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
-                            title="进入终端"
+                            disabled={restarting === proc.name}
+                            className="p-1.5 rounded-md text-noc-muted hover:text-amber-400 hover:bg-amber-500/10 transition-colors disabled:opacity-50"
+                            title={restarting === proc.name ? '重启中...' : '重启'}
                           >
-                            <Terminal className="w-4 h-4" />
+                            <RotateCcw className={`w-4 h-4 ${restarting === proc.name ? 'animate-spin' : ''}`} />
                           </button>
                         </div>
                       </td>

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   FileText,
   Search,
@@ -73,8 +74,9 @@ interface StreamLog {
 
 export default function LogCenter() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [tab, setTab] = useState<'history' | 'stream'>('history');
-  const [selectedSource, setSelectedSource] = useState<string>('amfd');
+  const [selectedSource, setSelectedSource] = useState<string>(() => searchParams.get('source') || 'amfd');
   const [searchTerm, setSearchTerm] = useState('');
   const [levelFilter, setLevelFilter] = useState<string>('all');
   const [expandedLog, setExpandedLog] = useState<string | null>(null);
