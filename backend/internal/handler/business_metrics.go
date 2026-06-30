@@ -16,12 +16,10 @@ import (
 
 // BusinessMetrics 业务指标
 type BusinessMetrics struct {
-	EPCOnlineUsers   int64   `json:"epc_online_users"`    // EPC/5GC 在线用户数（有活跃会话）
-	IMSOnlineUsers   int64   `json:"ims_online_users"`    // IMS 在线用户数（已注册）
-	TotalSubscribers int64   `json:"total_subscribers"`   // 总订户数（EPC/5GC）
-	TotalIMSUsers    int64   `json:"total_ims_users"`     // 总 IMS 用户数
-	ActiveCalls      int64   `json:"active_calls"`        // 并发呼叫数
-	SIPRegSuccessRate float64 `json:"sip_reg_success_rate"` // SIP 注册成功率
+	EPCOnlineUsers   int64 `json:"epc_online_users"`  // EPC/5GC 在线用户数（有活跃会话）
+	IMSOnlineUsers   int64 `json:"ims_online_users"`  // IMS 在线用户数（已注册）
+	TotalSubscribers int64 `json:"total_subscribers"` // 总订户数（EPC/5GC）
+	TotalIMSUsers    int64 `json:"total_ims_users"`   // 总 IMS 用户数
 }
 
 // GetBusinessMetrics 获取业务指标
@@ -86,16 +84,6 @@ func (h *Handler) GetBusinessMetrics(w http.ResponseWriter, r *http.Request) {
 			metrics.IMSOnlineUsers = onlineIMSUsers
 		}
 	}
-
-	// 计算 SIP 注册成功率
-	if metrics.TotalIMSUsers > 0 {
-		metrics.SIPRegSuccessRate = float64(metrics.IMSOnlineUsers) / float64(metrics.TotalIMSUsers) * 100
-	} else {
-		metrics.SIPRegSuccessRate = 100.0
-	}
-
-	// 并发呼叫数（需要从其他来源获取，暂时为 0）
-	metrics.ActiveCalls = 0
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status": "ok",

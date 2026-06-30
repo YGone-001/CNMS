@@ -8,8 +8,6 @@ interface BusinessMetricsData {
   ims_online_users: number;
   total_subscribers: number;
   total_ims_users: number;
-  active_calls: number;
-  sip_reg_success_rate: number;
 }
 
 // Context 值类型

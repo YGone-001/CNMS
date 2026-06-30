@@ -26,8 +26,6 @@ interface BusinessMetrics {
   ims_online_users: number;    // IMS 在线用户数
   total_subscribers: number;   // 总订户数（EPC/5GC）
   total_ims_users: number;     // 总 IMS 用户数
-  active_calls: number;        // 并发呼叫数
-  sip_reg_success_rate: number; // SIP 注册成功率
 }
 
 // 概览仪表盘页面

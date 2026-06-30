@@ -67,12 +67,10 @@ type DeploymentStatusMessage struct {
 
 // BusinessMetricsMessage 业务指标消息
 type BusinessMetricsMessage struct {
-	EPCOnlineUsers    int64   `json:"epc_online_users"`
-	IMSOnlineUsers    int64   `json:"ims_online_users"`
-	TotalSubscribers  int64   `json:"total_subscribers"`
-	TotalIMSUsers     int64   `json:"total_ims_users"`
-	ActiveCalls       int64   `json:"active_calls"`
-	SIPRegSuccessRate float64 `json:"sip_reg_success_rate"`
+	EPCOnlineUsers   int64 `json:"epc_online_users"`
+	IMSOnlineUsers   int64 `json:"ims_online_users"`
+	TotalSubscribers int64 `json:"total_subscribers"`
+	TotalIMSUsers    int64 `json:"total_ims_users"`
 }
 
 // MonitorDeploymentWS 部署状态 WebSocket 连接
@@ -259,13 +257,6 @@ func (h *DeploymentWSHandler) pushBusinessMetrics(conn *websocket.Conn) {
 		}
 	}
 
-	// 计算 SIP 注册成功率
-	if metrics.TotalIMSUsers > 0 {
-		metrics.SIPRegSuccessRate = float64(metrics.IMSOnlineUsers) / float64(metrics.TotalIMSUsers) * 100
-	} else {
-		metrics.SIPRegSuccessRate = 100.0
-	}
-
 	msg := DeploymentWSMessage{
 		Type: "business_metrics",
 		Data: metrics,
@@ -278,12 +269,10 @@ func (h *DeploymentWSHandler) pushBusinessMetrics(conn *websocket.Conn) {
 
 // BusinessMetricsMetrics 业务指标
 type BusinessMetricsMetrics struct {
-	EPCOnlineUsers    int64   `json:"epc_online_users"`
-	IMSOnlineUsers    int64   `json:"ims_online_users"`
-	TotalSubscribers  int64   `json:"total_subscribers"`
-	TotalIMSUsers     int64   `json:"total_ims_users"`
-	ActiveCalls       int64   `json:"active_calls"`
-	SIPRegSuccessRate float64 `json:"sip_reg_success_rate"`
+	EPCOnlineUsers   int64 `json:"epc_online_users"`
+	IMSOnlineUsers   int64 `json:"ims_online_users"`
+	TotalSubscribers int64 `json:"total_subscribers"`
+	TotalIMSUsers    int64 `json:"total_ims_users"`
 }
 
 // getEPCOnlineUsersFromMetrics 从 Prometheus metrics 获取 EPC 在线用户
