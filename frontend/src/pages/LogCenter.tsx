@@ -27,33 +27,38 @@ import { useNavigate } from 'react-router-dom';
 interface LogSource {
   id: string;
   name: string;
+  displayName: string;
   icon: React.ReactNode;
   group: string;
+  available: boolean;
 }
 
-const LOG_SOURCES: LogSource[] = [
-  // EPC+5GC
-  { id: 'amfd', name: 'AMF', icon: <Wifi className="w-3.5 h-3.5" />, group: '5GC' },
-  { id: 'ausfd', name: 'AUSF', icon: <Server className="w-3.5 h-3.5" />, group: '5GC' },
-  { id: 'nssfd', name: 'NSSF', icon: <Server className="w-3.5 h-3.5" />, group: '5GC' },
-  { id: 'nrfd', name: 'NRF', icon: <Server className="w-3.5 h-3.5" />, group: '5GC' },
-  { id: 'smfd', name: 'SMF', icon: <Server className="w-3.5 h-3.5" />, group: '5GC' },
-  { id: 'upfd', name: 'UPF', icon: <Server className="w-3.5 h-3.5" />, group: '5GC' },
-  { id: 'pcfd', name: 'PCF', icon: <Server className="w-3.5 h-3.5" />, group: '5GC' },
-  { id: 'udmd', name: 'UDM', icon: <Server className="w-3.5 h-3.5" />, group: '5GC' },
-  { id: 'udrd', name: 'UDR', icon: <Server className="w-3.5 h-3.5" />, group: '5GC' },
-  { id: 'mmed', name: 'MME', icon: <Server className="w-3.5 h-3.5" />, group: 'EPC' },
-  { id: 'hssd', name: 'HSS', icon: <Server className="w-3.5 h-3.5" />, group: 'EPC' },
-  { id: 'sgwcd', name: 'SGWC', icon: <Server className="w-3.5 h-3.5" />, group: 'EPC' },
-  { id: 'sgwud', name: 'SGWU', icon: <Server className="w-3.5 h-3.5" />, group: 'EPC' },
-  { id: 'pgwcd', name: 'PGWC', icon: <Server className="w-3.5 h-3.5" />, group: 'EPC' },
-  { id: 'pgwud', name: 'PGWU', icon: <Server className="w-3.5 h-3.5" />, group: 'EPC' },
-  { id: 'pcrfd', name: 'PCRF', icon: <Server className="w-3.5 h-3.5" />, group: 'EPC' },
+// Process name → log file name mapping
+// open5gs: amfd→amf, smfd→smf, hssd→hss, mmed→mme, etc.
+// cscf/imsHss: process name matches log prefix
+const LOG_SOURCE_DEFS: Omit<LogSource, 'available'>[] = [
+  // EPC (open5gs)
+  { id: 'mmed', name: 'mme', displayName: 'MME', icon: <Server className="w-3.5 h-3.5" />, group: 'EPC' },
+  { id: 'hssd', name: 'hss', displayName: 'HSS', icon: <Server className="w-3.5 h-3.5" />, group: 'EPC' },
+  { id: 'sgwcd', name: 'sgwc', displayName: 'SGWC', icon: <Server className="w-3.5 h-3.5" />, group: 'EPC' },
+  { id: 'sgwud', name: 'sgwu', displayName: 'SGWU', icon: <Server className="w-3.5 h-3.5" />, group: 'EPC' },
+  { id: 'pgwcd', name: 'pgwc', displayName: 'PGWC', icon: <Server className="w-3.5 h-3.5" />, group: 'EPC' },
+  { id: 'pgwud', name: 'pgwu', displayName: 'PGWU', icon: <Server className="w-3.5 h-3.5" />, group: 'EPC' },
+  { id: 'pcrfd', name: 'pcrf', displayName: 'PCRF', icon: <Server className="w-3.5 h-3.5" />, group: 'EPC' },
+  // 5GC (open5gs)
+  { id: 'smfd', name: 'smf', displayName: 'SMF', icon: <Wifi className="w-3.5 h-3.5" />, group: '5GC' },
+  { id: 'upfd', name: 'upf', displayName: 'UPF', icon: <Wifi className="w-3.5 h-3.5" />, group: '5GC' },
+  { id: 'amfd', name: 'amf', displayName: 'AMF', icon: <Wifi className="w-3.5 h-3.5" />, group: '5GC' },
+  { id: 'ausfd', name: 'ausf', displayName: 'AUSF', icon: <Wifi className="w-3.5 h-3.5" />, group: '5GC' },
+  { id: 'nrfd', name: 'nrf', displayName: 'NRF', icon: <Wifi className="w-3.5 h-3.5" />, group: '5GC' },
+  { id: 'nssfd', name: 'nssf', displayName: 'NSSF', icon: <Wifi className="w-3.5 h-3.5" />, group: '5GC' },
+  { id: 'udmd', name: 'udm', displayName: 'UDM', icon: <Wifi className="w-3.5 h-3.5" />, group: '5GC' },
+  { id: 'udrd', name: 'udr', displayName: 'UDR', icon: <Wifi className="w-3.5 h-3.5" />, group: '5GC' },
   // IMS
-  { id: 'pcscf', name: 'P-CSCF', icon: <Radio className="w-3.5 h-3.5" />, group: 'IMS' },
-  { id: 'icscf', name: 'I-CSCF', icon: <Radio className="w-3.5 h-3.5" />, group: 'IMS' },
-  { id: 'scscf', name: 'S-CSCF', icon: <Radio className="w-3.5 h-3.5" />, group: 'IMS' },
-  { id: 'imsHss', name: 'IMS HSS', icon: <Link2 className="w-3.5 h-3.5" />, group: 'IMS' },
+  { id: 'pcscf', name: 'pcscf', displayName: 'P-CSCF', icon: <Radio className="w-3.5 h-3.5" />, group: 'IMS' },
+  { id: 'icscf', name: 'icscf', displayName: 'I-CSCF', icon: <Radio className="w-3.5 h-3.5" />, group: 'IMS' },
+  { id: 'scscf', name: 'scscf', displayName: 'S-CSCF', icon: <Radio className="w-3.5 h-3.5" />, group: 'IMS' },
+  { id: 'imsHss', name: 'imsHss', displayName: 'IMS HSS', icon: <Link2 className="w-3.5 h-3.5" />, group: 'IMS' },
 ];
 
 // ---- Types ----
@@ -74,6 +79,7 @@ export default function LogCenter() {
   const [levelFilter, setLevelFilter] = useState<string>('all');
   const [expandedLog, setExpandedLog] = useState<string | null>(null);
   const [alarmKeywords, setAlarmKeywords] = useState<string[]>([]);
+  const [availableFiles, setAvailableFiles] = useState<Set<string>>(new Set());
 
   // Streaming state
   const [streamLogs, setStreamLogs] = useState<StreamLog[]>([]);
@@ -82,6 +88,27 @@ export default function LogCenter() {
   const wsRef = useRef<WebSocket | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
   const streamIdRef = useRef(0);
+
+  // Fetch available log files
+  useEffect(() => {
+    const fetchFiles = async () => {
+      try {
+        const resp = await fetch('/api/v1/nf/logs/files');
+        const data = await resp.json();
+        if (data.status === 'ok' && data.files) {
+          const names = new Set<string>();
+          data.files.forEach((f: { name: string }) => {
+            // "pcscf-2026-06-30" → "pcscf", "smf" → "smf"
+            names.add(f.name.replace(/-\d{4}-\d{2}-\d{2}$/, ''));
+          });
+          setAvailableFiles(names);
+        }
+      } catch { /* ignore */ }
+    };
+    fetchFiles();
+    const interval = setInterval(fetchFiles, 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Fetch alarm keywords for linking
   useEffect(() => {
@@ -101,15 +128,23 @@ export default function LogCenter() {
     fetchAlarms();
   }, []);
 
+  // Build sources with availability
+  const logSources = useMemo<LogSource[]>(() => {
+    return LOG_SOURCE_DEFS.map((s) => ({
+      ...s,
+      available: availableFiles.has(s.name),
+    }));
+  }, [availableFiles]);
+
   // Group sources
   const groupedSources = useMemo(() => {
     const groups: Record<string, LogSource[]> = {};
-    LOG_SOURCES.forEach((s) => {
+    logSources.forEach((s) => {
       if (!groups[s.group]) groups[s.group] = [];
       groups[s.group].push(s);
     });
     return groups;
-  }, []);
+  }, [logSources]);
 
   // ---- WebSocket streaming ----
   const startStream = useCallback(() => {
@@ -124,7 +159,10 @@ export default function LogCenter() {
     wsRef.current = ws;
 
     ws.onopen = () => {
-      ws.send(JSON.stringify({ name: selectedSource, level: streamFilter.level, keyword: streamFilter.keyword, tail: 100 }));
+      // Send the log file base name (not the process name)
+      const src = logSources.find((s) => s.id === selectedSource);
+      const logName = src?.name || selectedSource;
+      ws.send(JSON.stringify({ name: logName, level: streamFilter.level, keyword: streamFilter.keyword, tail: 100 }));
     };
 
     ws.onmessage = (e) => {
@@ -227,7 +265,7 @@ export default function LogCenter() {
     return parts.length > 0 ? parts : msg;
   };
 
-  const currentSource = LOG_SOURCES.find((s) => s.id === selectedSource);
+  const currentSource = logSources.find((s) => s.id === selectedSource);
 
   return (
     <div className="space-y-6">
@@ -264,15 +302,19 @@ export default function LogCenter() {
               {sources.map((s) => (
                 <button
                   key={s.id}
-                  onClick={() => { setSelectedSource(s.id); if (streaming) { stopStream(); } }}
+                  onClick={() => { if (s.available) { setSelectedSource(s.id); if (streaming) { stopStream(); } } }}
+                  disabled={!s.available}
                   className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs transition-all ${
-                    selectedSource === s.id
+                    !s.available
+                      ? 'bg-noc-bg/50 text-noc-muted/40 border border-noc-border/50 cursor-not-allowed'
+                      : selectedSource === s.id
                       ? 'bg-noc-accent/10 text-noc-accent border border-noc-accent/30'
                       : 'bg-noc-bg text-noc-muted border border-noc-border hover:border-noc-accent/30'
                   }`}
                 >
                   {s.icon}
-                  {s.name}
+                  {s.displayName}
+                  {!s.available && <span className="text-[9px] opacity-50">(无日志)</span>}
                 </button>
               ))}
             </div>

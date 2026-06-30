@@ -301,35 +301,45 @@ func (lsh *LogStreamHandler) pushTailLines(conn interface{ WriteJSON(interface{}
 
 // findLogFile 查找 NF 的日志文件（搜索所有日志目录）
 func (lsh *LogStreamHandler) findLogFile(name string) string {
-	for _, dir := range lsh.allLogDirs() {
-		// 精确匹配
-		candidates := []string{
-			filepath.Join(dir, name+".log"),
-			filepath.Join(dir, name, name+".log"),
-			filepath.Join(dir, name, "process.log"),
-		}
-		for _, path := range candidates {
-			if _, err := os.Stat(path); err == nil {
-				return path
-			}
-		}
+	// 构建候选名称：原名 + 去掉尾部d（open5gs进程名 amfd → 日志名 amf）
+	searchNames := []string{name}
+	if strings.HasSuffix(name, "d") && len(name) > 1 {
+		searchNames = append(searchNames, strings.TrimSuffix(name, "d"))
+	}
 
-		// 子目录中查找
-		subdir := filepath.Join(dir, name)
-		if entries, err := os.ReadDir(subdir); err == nil {
-			for _, e := range entries {
-				if !e.IsDir() && strings.HasSuffix(e.Name(), ".log") {
-					return filepath.Join(subdir, e.Name())
+	for _, dir := range lsh.allLogDirs() {
+		for _, sname := range searchNames {
+			// 精确匹配
+			candidates := []string{
+				filepath.Join(dir, sname+".log"),
+				filepath.Join(dir, sname, sname+".log"),
+				filepath.Join(dir, sname, "process.log"),
+			}
+			for _, path := range candidates {
+				if _, err := os.Stat(path); err == nil {
+					return path
+				}
+			}
+
+			// 子目录中查找
+			subdir := filepath.Join(dir, sname)
+			if entries, err := os.ReadDir(subdir); err == nil {
+				for _, e := range entries {
+					if !e.IsDir() && strings.HasSuffix(e.Name(), ".log") {
+						return filepath.Join(subdir, e.Name())
+					}
 				}
 			}
 		}
 
 		// 模糊匹配：文件名包含关键字（如 cscf-2026-06-30.log 匹配 "cscf"）
 		if entries, err := os.ReadDir(dir); err == nil {
-			lowerName := strings.ToLower(name)
-			for _, e := range entries {
-				if !e.IsDir() && strings.HasSuffix(e.Name(), ".log") && strings.Contains(strings.ToLower(e.Name()), lowerName) {
-					return filepath.Join(dir, e.Name())
+			for _, sname := range searchNames {
+				lowerName := strings.ToLower(sname)
+				for _, e := range entries {
+					if !e.IsDir() && strings.HasSuffix(e.Name(), ".log") && strings.Contains(strings.ToLower(e.Name()), lowerName) {
+						return filepath.Join(dir, e.Name())
+					}
 				}
 			}
 		}
