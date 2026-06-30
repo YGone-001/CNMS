@@ -119,7 +119,7 @@ export default function Overview() {
     } finally {
       setLoading(false);
     }
-  }, [updateCriticalAlarms, wsStatus]);
+  }, [wsStatus]);
 
   // 切换部署模板
   const switchTemplate = useCallback(async (templateName: string) => {
