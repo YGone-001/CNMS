@@ -517,7 +517,6 @@ export default function Overview() {
                       if (!statusFilter) return true;
                       return proc.state === statusFilter;
                     });
-                    // 按 category 分组
                     const groups: Record<string, typeof filtered> = {};
                     filtered.forEach((proc) => {
                       const cat = proc.category || '其他';
@@ -526,16 +525,14 @@ export default function Overview() {
                     });
                     const groupOrder = ['5G Core', '4G/EPC', 'IMS', 'EPC', 'Support', '其他'];
                     const sortedGroups = Object.entries(groups).sort(([a], [b]) => {
-                      const ai = groupOrder.indexOf(a);
-                      const bi = groupOrder.indexOf(b);
-                      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+                      return (groupOrder.indexOf(a) === -1 ? 99 : groupOrder.indexOf(a)) - (groupOrder.indexOf(b) === -1 ? 99 : groupOrder.indexOf(b));
                     });
 
-                    return sortedGroups.map(([cat, procs]) => {
+                    const rows: JSX.Element[] = [];
+                    sortedGroups.forEach(([cat, procs]) => {
                       const isCollapsed = collapsedGroups.has(cat);
                       const runningCount = procs.filter(p => p.state === 'running').length;
-                      return [
-                        // Group header row
+                      rows.push(
                         <tr key={`group-${cat}`} className="bg-noc-bg/50">
                           <td colSpan={7} className="px-6 py-2.5">
                             <button
@@ -547,88 +544,49 @@ export default function Overview() {
                               })}
                               className="flex items-center gap-2 w-full text-left"
                             >
-                              {isCollapsed ? (
-                                <ChevronRight className="w-4 h-4 text-noc-muted" />
-                              ) : (
-                                <ChevronDown className="w-4 h-4 text-noc-muted" />
-                              )}
+                              {isCollapsed ? <ChevronRight className="w-4 h-4 text-noc-muted" /> : <ChevronDown className="w-4 h-4 text-noc-muted" />}
                               <span className="text-sm font-semibold text-noc-text">{cat}</span>
                               <span className="text-xs text-noc-muted">({runningCount}/{procs.length} 运行中)</span>
                             </button>
                           </td>
-                        </tr>,
-                        // Process rows
-                        ...(!isCollapsed ? procs.map((proc) => (
-                          <tr key={proc.name} className="group hover:bg-noc-bg-50 transition-colors">
-                            <td className="px-6 py-4 pl-12">
-                              <div className="flex items-center gap-3">
-                                <Server className="w-4 h-4 text-noc-muted" />
-                                <span className="text-sm font-medium text-noc-text">{proc.name}</span>
-                                {proc.required && (
-                                  <span className="px-1.5 py-0.5 text-xs bg-red-500/10 text-red-400 rounded">必需</span>
-                                )}
-                              </div>
-                            </td>
-                            <td className="px-6 py-4">
-                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${getStateColor(proc.state)}`}>
-                                <span className={`relative flex h-2 w-2 ${proc.state === 'running' ? 'animate-pulse' : ''}`}>
-                                  {proc.state === 'running' && (
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                  )}
-                                  <span className={`relative inline-flex rounded-full h-2 w-2 ${
-                                    proc.state === 'running' ? 'bg-emerald-400' :
-                                    proc.state === 'stopped' ? 'bg-red-400' :
-                                    proc.state === 'disabled' ? 'bg-gray-400' :
-                                    proc.state === 'expected_missing' ? 'bg-blue-400' :
-                                    'bg-amber-400'
-                                  }`}></span>
+                        </tr>
+                      );
+                      if (!isCollapsed) {
+                        procs.forEach((proc) => {
+                          rows.push(
+                            <tr key={proc.name} className="group hover:bg-noc-bg-50 transition-colors">
+                              <td className="px-6 py-4 pl-12">
+                                <div className="flex items-center gap-3">
+                                  <Server className="w-4 h-4 text-noc-muted" />
+                                  <span className="text-sm font-medium text-noc-text">{proc.name}</span>
+                                  {proc.required && <span className="px-1.5 py-0.5 text-xs bg-red-500/10 text-red-400 rounded">必需</span>}
+                                </div>
+                              </td>
+                              <td className="px-6 py-4">
+                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${getStateColor(proc.state)}`}>
+                                  <span className={`relative flex h-2 w-2 ${proc.state === 'running' ? 'animate-pulse' : ''}`}>
+                                    {proc.state === 'running' && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />}
+                                    <span className={`relative inline-flex rounded-full h-2 w-2 ${proc.state === 'running' ? 'bg-emerald-400' : proc.state === 'stopped' ? 'bg-red-400' : proc.state === 'disabled' ? 'bg-gray-400' : proc.state === 'expected_missing' ? 'bg-blue-400' : 'bg-amber-400'}`} />
+                                  </span>
+                                  {getStateLabel(proc.state)}
                                 </span>
-                                {getStateLabel(proc.state)}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4">
-                              <span className="text-sm text-noc-muted">{proc.category}</span>
-                            </td>
-                            <td className="px-6 py-4">
-                              {proc.state === 'running' ? (
-                                <span className="text-sm text-noc-text">{formatPercent(proc.cpu_percent, 1)}</span>
-                              ) : (
-                                <span className="text-sm text-noc-muted">-</span>
-                              )}
-                            </td>
-                            <td className="px-6 py-4">
-                              {proc.state === 'running' ? (
-                                <span className="text-sm text-noc-text">{formatBytes(proc.memory_rss)}</span>
-                              ) : (
-                                <span className="text-sm text-noc-muted">-</span>
-                              )}
-                            </td>
-                            <td className="px-6 py-4">
-                              <span className="text-sm text-noc-muted">{proc.description}</span>
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="flex items-center justify-end gap-1">
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); navigate(`/logs?source=${proc.name}`); }}
-                                  className="p-1.5 rounded-md text-noc-muted hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
-                                  title="查看日志"
-                                >
-                                  <FileText className="w-4 h-4" />
-                                </button>
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); restartNF(proc.name); }}
-                                  disabled={restarting === proc.name}
-                                  className="p-1.5 rounded-md text-noc-muted hover:text-amber-400 hover:bg-amber-500/10 transition-colors disabled:opacity-50"
-                                  title={restarting === proc.name ? '重启中...' : '重启'}
-                                >
-                                  <RotateCcw className={`w-4 h-4 ${restarting === proc.name ? 'animate-spin' : ''}`} />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        )) : []),
-                      ];
-                    }).flat();
+                              </td>
+                              <td className="px-6 py-4"><span className="text-sm text-noc-muted">{proc.category}</span></td>
+                              <td className="px-6 py-4">{proc.state === 'running' ? <span className="text-sm text-noc-text">{formatPercent(proc.cpu_percent, 1)}</span> : <span className="text-sm text-noc-muted">-</span>}</td>
+                              <td className="px-6 py-4">{proc.state === 'running' ? <span className="text-sm text-noc-text">{formatBytes(proc.memory_rss)}</span> : <span className="text-sm text-noc-muted">-</span>}</td>
+                              <td className="px-6 py-4"><span className="text-sm text-noc-muted">{proc.description}</span></td>
+                              <td className="px-6 py-4">
+                                <div className="flex items-center justify-end gap-1">
+                                  <button onClick={(e) => { e.stopPropagation(); navigate(`/logs?source=${proc.name}`); }} className="p-1.5 rounded-md text-noc-muted hover:text-blue-400 hover:bg-blue-500/10 transition-colors" title="查看日志"><FileText className="w-4 h-4" /></button>
+                                  <button onClick={(e) => { e.stopPropagation(); restartNF(proc.name); }} disabled={restarting === proc.name} className="p-1.5 rounded-md text-noc-muted hover:text-amber-400 hover:bg-amber-500/10 transition-colors disabled:opacity-50" title={restarting === proc.name ? '重启中...' : '重启'}><RotateCcw className={`w-4 h-4 ${restarting === proc.name ? 'animate-spin' : ''}`} /></button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        });
+                      }
+                    });
+                    return rows;
                   })()}
                 </tbody>
               </table>
