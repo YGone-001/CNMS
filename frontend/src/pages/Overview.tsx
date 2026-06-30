@@ -45,7 +45,7 @@ export default function Overview() {
   const [error, setError] = useState<string | null>(null);
   const [showTemplateMenu, setShowTemplateMenu] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string | null>(null); // 状态过滤条件
-  const [criticalAlarms, setCriticalAlarms] = useState<Array<{id: string; source: string; message: string; timestamp: string}>>([]);
+  const [criticalAlarms, setCriticalAlarms] = useState<Array<{id: string; source: string; message: string; severity: string; timestamp: string}>>([]);
 
   // 获取部署模板列表
   const fetchTemplates = useCallback(async () => {
@@ -60,21 +60,21 @@ export default function Overview() {
     }
   }, []);
 
-  // 获取 Critical 告警（从部署状态中提取所有已停止的组件）
-  const updateCriticalAlarms = useCallback((status: SystemStatusEnhanced | null) => {
-    if (status?.processes) {
-      // 获取所有已停止的组件（包括必需和非必需）
-      const stoppedProcesses = status.processes.filter(
-        (p) => p.state === 'stopped'
-      );
-      const alarms = stoppedProcesses.map((p) => ({
-        id: `critical-${p.name}`,
-        source: p.name,
-        message: `${p.name} 进程停止运行 - ${p.description}`,
-        timestamp: new Date().toISOString(),
-      }));
-      setCriticalAlarms(alarms);
-    }
+  // 从 Alarm Center API 拉取活跃告警
+  const fetchAlarms = useCallback(async () => {
+    try {
+      const resp = await authFetch('/api/v1/alarms?active=true&acknowledged=false&page_size=20');
+      const data = await resp.json();
+      if (data.status === 'ok' && data.alarms) {
+        setCriticalAlarms(data.alarms.map((a: { _id: string; source: string; message: string; severity: string; timestamp: string }) => ({
+          id: a._id,
+          source: a.source,
+          message: a.message,
+          severity: a.severity,
+          timestamp: a.timestamp,
+        })));
+      }
+    } catch { /* ignore */ }
   }, []);
 
   // WebSocket 数据同步
@@ -82,9 +82,15 @@ export default function Overview() {
     if (wsDeploymentStatus) {
       setDeploymentStatus(wsDeploymentStatus);
       setCurrentTemplate(wsDeploymentStatus.template || 'auto');
-      updateCriticalAlarms(wsDeploymentStatus);
     }
-  }, [wsDeploymentStatus, updateCriticalAlarms]);
+  }, [wsDeploymentStatus]);
+
+  // 拉取告警 + 定时刷新
+  useEffect(() => {
+    fetchAlarms();
+    const interval = setInterval(fetchAlarms, 30000);
+    return () => clearInterval(interval);
+  }, [fetchAlarms]);
 
   useEffect(() => {
     if (wsBusinessMetrics) {
@@ -104,7 +110,6 @@ export default function Overview() {
       if (data.status === 'ok') {
         setDeploymentStatus(data.data);
         setCurrentTemplate(data.data.template || 'auto');
-        updateCriticalAlarms(data.data);
       } else {
         setError(data.message || 'Failed to fetch deployment status');
       }
@@ -282,23 +287,33 @@ export default function Overview() {
 
   return (
     <div className="space-y-6">
-      {/* Critical 告警横幅 */}
+      {/* 活跃告警横幅 */}
       {criticalAlarms.length > 0 && (
         <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4">
           <div className="flex items-center gap-3">
             <AlertTriangle className="w-5 h-5 text-red-400 animate-pulse flex-shrink-0" />
             <div className="flex-1 overflow-hidden">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-semibold text-red-400">致命告警</span>
-                <span className="px-2 py-0.5 bg-red-500/20 text-red-400 text-xs rounded-full">
+                <span className="text-sm font-semibold text-red-400">活跃告警</span>
+                <span className="px-2 py-0.5 bg-red-500/20 text-red-400 text-xs rounded-full font-bold">
                   {criticalAlarms.length}
                 </span>
+                {(() => {
+                  const critical = criticalAlarms.filter(a => a.severity === 'critical').length;
+                  const major = criticalAlarms.filter(a => a.severity === 'major').length;
+                  return (
+                    <span className="flex items-center gap-1.5 ml-2">
+                      {critical > 0 && <span className="text-[10px] text-red-400 bg-red-500/20 px-1.5 py-0.5 rounded">严重 {critical}</span>}
+                      {major > 0 && <span className="text-[10px] text-amber-400 bg-amber-500/20 px-1.5 py-0.5 rounded">主要 {major}</span>}
+                    </span>
+                  );
+                })()}
               </div>
               <div className="mt-1 overflow-hidden">
                 <div className="animate-marquee whitespace-nowrap">
                   {criticalAlarms.map((alarm, index) => (
                     <span key={alarm.id} className="text-sm text-red-300">
-                      {alarm.message}
+                      [{alarm.source}] {alarm.message}
                       {index < criticalAlarms.length - 1 && (
                         <span className="mx-4 text-red-500">•</span>
                       )}
