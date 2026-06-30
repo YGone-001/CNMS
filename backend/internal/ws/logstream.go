@@ -18,12 +18,25 @@ import (
 // LogStreamHandler 实时日志流 WebSocket 处理器
 type LogStreamHandler struct {
 	logDir      string
+	logDirs     []string // 多日志目录
 	authEnabled bool
 }
 
 // NewLogStreamHandler 创建日志流处理器
 func NewLogStreamHandler(logDir string, authEnabled bool) *LogStreamHandler {
 	return &LogStreamHandler{logDir: logDir, authEnabled: authEnabled}
+}
+
+// AddLogDir 添加额外的日志搜索目录
+func (lsh *LogStreamHandler) AddLogDir(dir string) {
+	lsh.logDirs = append(lsh.logDirs, dir)
+}
+
+// allLogDirs 返回所有日志目录（主目录 + 额外目录）
+func (lsh *LogStreamHandler) allLogDirs() []string {
+	dirs := []string{lsh.logDir}
+	dirs = append(dirs, lsh.logDirs...)
+	return dirs
 }
 
 // SetAuthEnabled 动态更新鉴权开关（供配置热加载使用）
@@ -286,30 +299,41 @@ func (lsh *LogStreamHandler) pushTailLines(conn interface{ WriteJSON(interface{}
 	return count
 }
 
-// findLogFile 查找 NF 的日志文件
+// findLogFile 查找 NF 的日志文件（搜索所有日志目录）
 func (lsh *LogStreamHandler) findLogFile(name string) string {
-	candidates := []string{
-		filepath.Join(lsh.logDir, name+".log"),
-		filepath.Join(lsh.logDir, name, name+".log"),
-		filepath.Join(lsh.logDir, name, "process.log"),
-	}
-
-	for _, path := range candidates {
-		if _, err := os.Stat(path); err == nil {
-			return path
+	for _, dir := range lsh.allLogDirs() {
+		// 精确匹配
+		candidates := []string{
+			filepath.Join(dir, name+".log"),
+			filepath.Join(dir, name, name+".log"),
+			filepath.Join(dir, name, "process.log"),
 		}
-	}
+		for _, path := range candidates {
+			if _, err := os.Stat(path); err == nil {
+				return path
+			}
+		}
 
-	// 尝试在子目录中查找任意 .log 文件
-	subdir := filepath.Join(lsh.logDir, name)
-	if entries, err := os.ReadDir(subdir); err == nil {
-		for _, e := range entries {
-			if !e.IsDir() && strings.HasSuffix(e.Name(), ".log") {
-				return filepath.Join(subdir, e.Name())
+		// 子目录中查找
+		subdir := filepath.Join(dir, name)
+		if entries, err := os.ReadDir(subdir); err == nil {
+			for _, e := range entries {
+				if !e.IsDir() && strings.HasSuffix(e.Name(), ".log") {
+					return filepath.Join(subdir, e.Name())
+				}
+			}
+		}
+
+		// 模糊匹配：文件名包含关键字（如 cscf-2026-06-30.log 匹配 "cscf"）
+		if entries, err := os.ReadDir(dir); err == nil {
+			lowerName := strings.ToLower(name)
+			for _, e := range entries {
+				if !e.IsDir() && strings.HasSuffix(e.Name(), ".log") && strings.Contains(strings.ToLower(e.Name()), lowerName) {
+					return filepath.Join(dir, e.Name())
+				}
 			}
 		}
 	}
-
 	return ""
 }
 
@@ -368,7 +392,7 @@ type LogStreamStats struct {
 	ModTime string `json:"mod_time"`
 }
 
-// GetLogFiles 列出所有可用的 NF 日志文件
+// GetLogFiles 列出所有可用的 NF 日志文件（所有目录）
 func (lsh *LogStreamHandler) GetLogFiles(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -376,39 +400,49 @@ func (lsh *LogStreamHandler) GetLogFiles(w http.ResponseWriter, r *http.Request)
 	}
 
 	var files []LogStreamStats
+	seen := make(map[string]bool)
 
-	entries, err := os.ReadDir(lsh.logDir)
-	if err != nil {
-		writeJSONHelper(w, http.StatusOK, map[string]interface{}{"status": "ok", "files": []LogStreamStats{}})
-		return
-	}
+	for _, dir := range lsh.allLogDirs() {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
 
-	for _, e := range entries {
-		if e.IsDir() {
-			subdir := filepath.Join(lsh.logDir, e.Name())
-			subEntries, _ := os.ReadDir(subdir)
-			for _, se := range subEntries {
-				if !se.IsDir() && strings.HasSuffix(se.Name(), ".log") {
-					path := filepath.Join(subdir, se.Name())
-					info, _ := se.Info()
-					files = append(files, LogStreamStats{
-						Name:    e.Name(),
-						Path:    path,
-						Size:    info.Size(),
-						ModTime: info.ModTime().Format(time.RFC3339),
-					})
+		for _, e := range entries {
+			if e.IsDir() {
+				subdir := filepath.Join(dir, e.Name())
+				subEntries, _ := os.ReadDir(subdir)
+				for _, se := range subEntries {
+					if !se.IsDir() && strings.HasSuffix(se.Name(), ".log") {
+						path := filepath.Join(subdir, se.Name())
+						if seen[path] {
+							continue
+						}
+						seen[path] = true
+						info, _ := se.Info()
+						files = append(files, LogStreamStats{
+							Name:    e.Name(),
+							Path:    path,
+							Size:    info.Size(),
+							ModTime: info.ModTime().Format(time.RFC3339),
+						})
+					}
 				}
+			} else if strings.HasSuffix(e.Name(), ".log") {
+				name := strings.TrimSuffix(e.Name(), ".log")
+				path := filepath.Join(dir, e.Name())
+				if seen[path] {
+					continue
+				}
+				seen[path] = true
+				info, _ := e.Info()
+				files = append(files, LogStreamStats{
+					Name:    name,
+					Path:    path,
+					Size:    info.Size(),
+					ModTime: info.ModTime().Format(time.RFC3339),
+				})
 			}
-		} else if strings.HasSuffix(e.Name(), ".log") {
-			name := strings.TrimSuffix(e.Name(), ".log")
-			path := filepath.Join(lsh.logDir, e.Name())
-			info, _ := e.Info()
-			files = append(files, LogStreamStats{
-				Name:    name,
-				Path:    path,
-				Size:    info.Size(),
-				ModTime: info.ModTime().Format(time.RFC3339),
-			})
 		}
 	}
 

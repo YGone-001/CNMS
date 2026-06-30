@@ -101,6 +101,10 @@ func main() {
 	h := handler.NewWithAllDB(mc, mysqlDB, scscfDB, cfg.LogDir, cfg.Auth)
 	wh := ws.NewWSHandler(mc, cfg.Notify.WebhookURL, cfg.Notify.MinLevel, cfg.Auth.Enabled)
 	lsh := ws.NewLogStreamHandler(cfg.LogDir, cfg.Auth.Enabled)
+	// 添加额外日志目录
+	lsh.AddLogDir("/usr/local/src/open5gs/install/var/log/open5gs")
+	lsh.AddLogDir("/var/log/cscf")
+	lsh.AddLogDir("/var/log/imsHss")
 	dwh := ws.NewDeploymentWSHandler(mc, mysqlDB, scscfDB, cfg.Auth.Enabled)
 
 	// 启动定时任务调度器

@@ -1,12 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   FileText,
   Search,
   Download,
   RefreshCw,
   Clock,
-  User,
-  Activity,
   AlertTriangle,
   Info,
   CheckCircle,
@@ -14,217 +12,222 @@ import {
   ChevronDown,
   ChevronRight,
   Terminal,
-  Database,
   Server,
-  Network,
+  Wifi,
+  Radio,
+  Link2,
+  Zap,
+  Play,
+  Square,
+  ExternalLink,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
-interface LogEntry {
+// ---- Log source definitions ----
+interface LogSource {
+  id: string;
+  name: string;
+  icon: React.ReactNode;
+  group: string;
+}
+
+const LOG_SOURCES: LogSource[] = [
+  // EPC+5GC
+  { id: 'amfd', name: 'AMF', icon: <Wifi className="w-3.5 h-3.5" />, group: '5GC' },
+  { id: 'ausfd', name: 'AUSF', icon: <Server className="w-3.5 h-3.5" />, group: '5GC' },
+  { id: 'nssfd', name: 'NSSF', icon: <Server className="w-3.5 h-3.5" />, group: '5GC' },
+  { id: 'nrfd', name: 'NRF', icon: <Server className="w-3.5 h-3.5" />, group: '5GC' },
+  { id: 'smfd', name: 'SMF', icon: <Server className="w-3.5 h-3.5" />, group: '5GC' },
+  { id: 'upfd', name: 'UPF', icon: <Server className="w-3.5 h-3.5" />, group: '5GC' },
+  { id: 'pcfd', name: 'PCF', icon: <Server className="w-3.5 h-3.5" />, group: '5GC' },
+  { id: 'udmd', name: 'UDM', icon: <Server className="w-3.5 h-3.5" />, group: '5GC' },
+  { id: 'udrd', name: 'UDR', icon: <Server className="w-3.5 h-3.5" />, group: '5GC' },
+  { id: 'mmed', name: 'MME', icon: <Server className="w-3.5 h-3.5" />, group: 'EPC' },
+  { id: 'hssd', name: 'HSS', icon: <Server className="w-3.5 h-3.5" />, group: 'EPC' },
+  { id: 'sgwcd', name: 'SGWC', icon: <Server className="w-3.5 h-3.5" />, group: 'EPC' },
+  { id: 'sgwud', name: 'SGWU', icon: <Server className="w-3.5 h-3.5" />, group: 'EPC' },
+  { id: 'pgwcd', name: 'PGWC', icon: <Server className="w-3.5 h-3.5" />, group: 'EPC' },
+  { id: 'pgwud', name: 'PGWU', icon: <Server className="w-3.5 h-3.5" />, group: 'EPC' },
+  { id: 'pcrfd', name: 'PCRF', icon: <Server className="w-3.5 h-3.5" />, group: 'EPC' },
+  // IMS
+  { id: 'pcscf', name: 'P-CSCF', icon: <Radio className="w-3.5 h-3.5" />, group: 'IMS' },
+  { id: 'icscf', name: 'I-CSCF', icon: <Radio className="w-3.5 h-3.5" />, group: 'IMS' },
+  { id: 'scscf', name: 'S-CSCF', icon: <Radio className="w-3.5 h-3.5" />, group: 'IMS' },
+  { id: 'imsHss', name: 'IMS HSS', icon: <Link2 className="w-3.5 h-3.5" />, group: 'IMS' },
+];
+
+// ---- Types ----
+interface StreamLog {
   id: string;
   timestamp: string;
-  level: 'info' | 'warn' | 'error' | 'debug';
+  level: string;
+  message: string;
+  raw: string;
   source: string;
-  category: 'system' | 'security' | 'operation' | 'audit';
-  user?: string;
-  action: string;
-  detail: string;
-  ip?: string;
-  status?: 'success' | 'failure';
 }
 
 export default function LogCenter() {
-  const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+  const [tab, setTab] = useState<'history' | 'stream'>('history');
+  const [selectedSource, setSelectedSource] = useState<string>('amfd');
   const [searchTerm, setSearchTerm] = useState('');
   const [levelFilter, setLevelFilter] = useState<string>('all');
-  const [categoryFilter, setCategoryFilter] = useState<string>('all');
-  const [dateRange, setDateRange] = useState<string>('today');
   const [expandedLog, setExpandedLog] = useState<string | null>(null);
+  const [alarmKeywords, setAlarmKeywords] = useState<string[]>([]);
 
-  const fetchLogs = useCallback(async () => {
-    setLoading(true);
-    try {
-      // Mock data - replace with actual API call
-      const mockLogs: LogEntry[] = [
-        {
-          id: '1',
-          timestamp: '2024-01-15 10:30:45',
-          level: 'info',
-          source: 'AMF',
-          category: 'system',
-          action: '进程启动',
-          detail: 'AMF 进程启动成功，PID: 12345',
-          status: 'success',
-        },
-        {
-          id: '2',
-          timestamp: '2024-01-15 10:28:30',
-          level: 'warn',
-          source: 'SMF',
-          category: 'operation',
-          user: 'admin',
-          action: '配置变更',
-          detail: '修改 SMF 会话超时时间从 30s 到 60s',
-          ip: '192.168.1.100',
-          status: 'success',
-        },
-        {
-          id: '3',
-          timestamp: '2024-01-15 10:25:15',
-          level: 'error',
-          source: 'UPF',
-          category: 'system',
-          action: '进程异常',
-          detail: 'UPF 进程异常退出，退出码: 137 (OOM Killed)',
-          status: 'failure',
-        },
-        {
-          id: '4',
-          timestamp: '2024-01-15 10:20:00',
-          level: 'info',
-          source: 'WebUI',
-          category: 'audit',
-          user: 'operator1',
-          action: '用户登录',
-          detail: '用户 operator1 登录系统',
-          ip: '192.168.1.101',
-          status: 'success',
-        },
-        {
-          id: '5',
-          timestamp: '2024-01-15 10:15:30',
-          level: 'info',
-          source: 'NRF',
-          category: 'security',
-          action: '服务注册',
-          detail: 'NF 实例注册成功，InstanceId: nf-001',
-          status: 'success',
-        },
-        {
-          id: '6',
-          timestamp: '2024-01-15 10:10:45',
-          level: 'debug',
-          source: 'MML',
-          category: 'operation',
-          user: 'admin',
-          action: 'MML 命令执行',
-          detail: '执行命令: LST-SUB: IMSI=460110000000001;',
-          ip: '192.168.1.100',
-          status: 'success',
-        },
-        {
-          id: '7',
-          timestamp: '2024-01-15 10:05:20',
-          level: 'warn',
-          source: 'MongoDB',
-          category: 'system',
-          action: '连接警告',
-          detail: '数据库连接池使用率达到 80%',
-        },
-        {
-          id: '8',
-          timestamp: '2024-01-15 10:00:00',
-          level: 'info',
-          source: 'Scheduler',
-          category: 'system',
-          action: '定时任务执行',
-          detail: '执行定时任务: 数据清理任务',
-          status: 'success',
-        },
-      ];
+  // Streaming state
+  const [streamLogs, setStreamLogs] = useState<StreamLog[]>([]);
+  const [streaming, setStreaming] = useState(false);
+  const [streamFilter, setStreamFilter] = useState({ level: '', keyword: '' });
+  const wsRef = useRef<WebSocket | null>(null);
+  const logEndRef = useRef<HTMLDivElement>(null);
+  const streamIdRef = useRef(0);
 
-      setLogs(mockLogs);
-    } catch (error) {
-      console.error('Failed to fetch logs:', error);
-    } finally {
-      setLoading(false);
+  // Fetch alarm keywords for linking
+  useEffect(() => {
+    const fetchAlarms = async () => {
+      try {
+        const resp = await fetch('/api/v1/alarms?active=true&page_size=50');
+        const data = await resp.json();
+        if (data.status === 'ok' && data.alarms) {
+          const keywords = data.alarms.flatMap((a: { source: string; message: string }) => [
+            a.source.toLowerCase(),
+            ...a.message.split(/\s+/).filter((w: string) => w.length > 3).map((w: string) => w.toLowerCase()),
+          ]);
+          setAlarmKeywords([...new Set(keywords)]);
+        }
+      } catch { /* ignore */ }
+    };
+    fetchAlarms();
+  }, []);
+
+  // Group sources
+  const groupedSources = useMemo(() => {
+    const groups: Record<string, LogSource[]> = {};
+    LOG_SOURCES.forEach((s) => {
+      if (!groups[s.group]) groups[s.group] = [];
+      groups[s.group].push(s);
+    });
+    return groups;
+  }, []);
+
+  // ---- WebSocket streaming ----
+  const startStream = useCallback(() => {
+    if (wsRef.current) {
+      wsRef.current.close();
     }
+    setStreamLogs([]);
+    setStreaming(true);
+
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(`${proto}//${location.host}/api/v1/nf/logs/ws`);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ name: selectedSource, level: streamFilter.level, keyword: streamFilter.keyword, tail: 100 }));
+    };
+
+    ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'meta' || msg.type === 'stats') return;
+        const log: StreamLog = {
+          id: String(++streamIdRef.current),
+          timestamp: msg.timestamp || '',
+          level: (msg.level || 'INFO').toUpperCase(),
+          message: msg.message || msg.raw || '',
+          raw: msg.raw || msg.message || '',
+          source: selectedSource,
+        };
+        setStreamLogs((prev) => {
+          const next = [...prev, log];
+          return next.length > 2000 ? next.slice(-1500) : next;
+        });
+      } catch { /* ignore */ }
+    };
+
+    ws.onclose = () => setStreaming(false);
+    ws.onerror = () => { ws.close(); setStreaming(false); };
+  }, [selectedSource, streamFilter]);
+
+  const stopStream = useCallback(() => {
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    setStreaming(false);
   }, []);
 
   useEffect(() => {
-    fetchLogs();
-  }, [fetchLogs]);
+    return () => { if (wsRef.current) wsRef.current.close(); };
+  }, []);
 
-  const filteredLogs = logs.filter((log) => {
-    const matchesSearch =
-      log.action.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      log.detail.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      log.source.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (log.user && log.user.toLowerCase().includes(searchTerm.toLowerCase()));
-    const matchesLevel = levelFilter === 'all' || log.level === levelFilter;
-    const matchesCategory = categoryFilter === 'all' || log.category === categoryFilter;
-    return matchesSearch && matchesLevel && matchesCategory;
-  });
-
-  const levelCounts = {
-    all: logs.length,
-    info: logs.filter((l) => l.level === 'info').length,
-    warn: logs.filter((l) => l.level === 'warn').length,
-    error: logs.filter((l) => l.level === 'error').length,
-    debug: logs.filter((l) => l.level === 'debug').length,
-  };
-
-  const getLevelIcon = (level: LogEntry['level']) => {
-    switch (level) {
-      case 'info':
-        return <Info className="w-4 h-4 text-blue-400" />;
-      case 'warn':
-        return <AlertTriangle className="w-4 h-4 text-amber-400" />;
-      case 'error':
-        return <XCircle className="w-4 h-4 text-red-400" />;
-      case 'debug':
-        return <Terminal className="w-4 h-4 text-gray-400" />;
+  // Auto-scroll
+  useEffect(() => {
+    if (tab === 'stream' && streaming) {
+      logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
+  }, [streamLogs, tab, streaming]);
+
+  // Update stream filter in real-time
+  useEffect(() => {
+    if (streaming && wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'filter', level: streamFilter.level, keyword: streamFilter.keyword }));
+    }
+  }, [streamFilter, streaming]);
+
+  // ---- Filtering ----
+  const filteredStreamLogs = useMemo(() => {
+    return streamLogs.filter((log) => {
+      if (levelFilter !== 'all' && !log.level.toLowerCase().includes(levelFilter)) return false;
+      if (searchTerm && !log.message.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+      return true;
+    });
+  }, [streamLogs, levelFilter, searchTerm]);
+
+  // ---- Helpers ----
+  const getLevelIcon = (level: string) => {
+    const l = level.toLowerCase();
+    if (l.includes('error')) return <XCircle className="w-3.5 h-3.5 text-red-400" />;
+    if (l.includes('warn')) return <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />;
+    if (l.includes('debug')) return <Terminal className="w-3.5 h-3.5 text-gray-400" />;
+    return <Info className="w-3.5 h-3.5 text-blue-400" />;
   };
 
-  const getLevelColor = (level: LogEntry['level']) => {
-    switch (level) {
-      case 'info':
-        return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
-      case 'warn':
-        return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
-      case 'error':
-        return 'bg-red-500/10 text-red-400 border-red-500/20';
-      case 'debug':
-        return 'bg-gray-500/10 text-gray-400 border-gray-500/20';
-    }
+  const getLevelColor = (level: string) => {
+    const l = level.toLowerCase();
+    if (l.includes('error')) return 'bg-red-500/10 text-red-400 border-red-500/20';
+    if (l.includes('warn')) return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
+    if (l.includes('debug')) return 'bg-gray-500/10 text-gray-400 border-gray-500/20';
+    return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
   };
 
-  const getCategoryIcon = (category: LogEntry['category']) => {
-    switch (category) {
-      case 'system':
-        return <Server className="w-4 h-4 text-noc-muted" />;
-      case 'security':
-        return <CheckCircle className="w-4 h-4 text-emerald-400" />;
-      case 'operation':
-        return <Activity className="w-4 h-4 text-blue-400" />;
-      case 'audit':
-        return <FileText className="w-4 h-4 text-purple-400" />;
+  // Highlight alarm-related keywords in log message
+  const highlightMessage = (msg: string) => {
+    if (alarmKeywords.length === 0) return msg;
+    const parts: React.ReactNode[] = [];
+    let remaining = msg;
+    const regex = new RegExp(`(${alarmKeywords.filter(k => k.length > 3).join('|')})`, 'gi');
+    let match;
+    let lastIndex = 0;
+    while ((match = regex.exec(msg)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push(msg.slice(lastIndex, match.index));
+      }
+      parts.push(
+        <span key={match.index} className="bg-red-500/20 text-red-300 px-0.5 rounded cursor-pointer hover:underline" onClick={(e) => { e.stopPropagation(); navigate('/alarms'); }}>
+          {match[0]}
+        </span>
+      );
+      lastIndex = regex.lastIndex;
     }
+    if (lastIndex < msg.length) {
+      parts.push(msg.slice(lastIndex));
+    }
+    return parts.length > 0 ? parts : msg;
   };
 
-  const getCategoryLabel = (category: LogEntry['category']) => {
-    switch (category) {
-      case 'system':
-        return '系统';
-      case 'security':
-        return '安全';
-      case 'operation':
-        return '操作';
-      case 'audit':
-        return '审计';
-    }
-  };
-
-  const getStatusIcon = (status?: LogEntry['status']) => {
-    if (!status) return null;
-    switch (status) {
-      case 'success':
-        return <CheckCircle className="w-3 h-3 text-emerald-400" />;
-      case 'failure':
-        return <XCircle className="w-3 h-3 text-red-400" />;
-    }
-  };
+  const currentSource = LOG_SOURCES.find((s) => s.id === selectedSource);
 
   return (
     <div className="space-y-6">
@@ -232,73 +235,53 @@ export default function LogCenter() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-noc-text">日志中心</h1>
-          <p className="text-sm text-noc-muted mt-1">系统日志、操作审计和安全事件</p>
+          <p className="text-sm text-noc-muted mt-1">实时日志流与历史日志查询</p>
         </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={fetchLogs}
-            className="flex items-center gap-2 px-4 py-2 bg-noc-surface border border-noc-border rounded-lg text-sm text-noc-text hover:bg-noc-bg-50 transition-colors"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-            刷新
-          </button>
-          <button className="flex items-center gap-2 px-4 py-2 bg-noc-surface border border-noc-border rounded-lg text-sm text-noc-text hover:bg-noc-bg-50 transition-colors">
-            <Download className="w-4 h-4" />
-            导出
-          </button>
-        </div>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-noc-surface border border-noc-border rounded-lg p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-noc-muted">总日志数</p>
-              <p className="text-2xl font-bold text-noc-text mt-1">{levelCounts.all}</p>
-            </div>
-            <div className="p-3 bg-blue-500/10 rounded-lg">
-              <FileText className="w-6 h-6 text-blue-400" />
-            </div>
-          </div>
-        </div>
-        <div className="bg-noc-surface border border-noc-border rounded-lg p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-noc-muted">警告</p>
-              <p className="text-2xl font-bold text-amber-400 mt-1">{levelCounts.warn}</p>
-            </div>
-            <div className="p-3 bg-amber-500/10 rounded-lg">
-              <AlertTriangle className="w-6 h-6 text-amber-400" />
-            </div>
-          </div>
-        </div>
-        <div className="bg-noc-surface border border-noc-border rounded-lg p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-noc-muted">错误</p>
-              <p className="text-2xl font-bold text-red-400 mt-1">{levelCounts.error}</p>
-            </div>
-            <div className="p-3 bg-red-500/10 rounded-lg">
-              <XCircle className="w-6 h-6 text-red-400" />
-            </div>
-          </div>
-        </div>
-        <div className="bg-noc-surface border border-noc-border rounded-lg p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-noc-muted">调试</p>
-              <p className="text-2xl font-bold text-gray-400 mt-1">{levelCounts.debug}</p>
-            </div>
-            <div className="p-3 bg-gray-500/10 rounded-lg">
-              <Terminal className="w-6 h-6 text-gray-400" />
-            </div>
+        <div className="flex items-center gap-2">
+          {/* Tab switcher */}
+          <div className="flex gap-1 bg-noc-surface rounded-lg p-1 border border-noc-border">
+            <button onClick={() => setTab('history')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${tab === 'history' ? 'bg-noc-accent/10 text-noc-accent border border-noc-accent/30' : 'text-noc-muted hover:text-noc-text border border-transparent'}`}>
+              <FileText className="w-3.5 h-3.5 inline mr-1" />历史
+            </button>
+            <button onClick={() => setTab('stream')} className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${tab === 'stream' ? 'bg-noc-accent/10 text-noc-accent border border-noc-accent/30' : 'text-noc-muted hover:text-noc-text border border-transparent'}`}>
+              <Zap className="w-3.5 h-3.5 inline mr-1" />实时流
+            </button>
           </div>
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="flex items-center gap-4 flex-wrap">
+      {/* Source selector */}
+      <div className="bg-noc-surface border border-noc-border rounded-lg p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <Server className="w-4 h-4 text-noc-muted" />
+          <span className="text-sm font-medium text-noc-text">日志源</span>
+          {currentSource && <span className="text-xs text-noc-accent ml-2">当前: {currentSource.name}</span>}
+        </div>
+        {Object.entries(groupedSources).map(([group, sources]) => (
+          <div key={group} className="mb-2">
+            <div className="text-[10px] text-noc-muted uppercase tracking-wider mb-1">{group}</div>
+            <div className="flex flex-wrap gap-1.5">
+              {sources.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => { setSelectedSource(s.id); if (streaming) { stopStream(); } }}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs transition-all ${
+                    selectedSource === s.id
+                      ? 'bg-noc-accent/10 text-noc-accent border border-noc-accent/30'
+                      : 'bg-noc-bg text-noc-muted border border-noc-border hover:border-noc-accent/30'
+                  }`}
+                >
+                  {s.icon}
+                  {s.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Filters + Stream controls */}
+      <div className="flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-noc-muted" />
           <input
@@ -309,125 +292,98 @@ export default function LogCenter() {
             className="w-full pl-10 pr-4 py-2 bg-noc-surface border border-noc-border rounded-lg text-sm text-noc-text placeholder-noc-muted focus:outline-none focus:border-noc-accent"
           />
         </div>
-        <select
-          value={levelFilter}
-          onChange={(e) => setLevelFilter(e.target.value)}
-          className="px-4 py-2 bg-noc-surface border border-noc-border rounded-lg text-sm text-noc-text"
-        >
+        <select value={levelFilter} onChange={(e) => setLevelFilter(e.target.value)} className="px-3 py-2 bg-noc-surface border border-noc-border rounded-lg text-sm text-noc-text">
           <option value="all">全部级别</option>
-          <option value="info">信息</option>
-          <option value="warn">警告</option>
-          <option value="error">错误</option>
-          <option value="debug">调试</option>
+          <option value="error">ERROR</option>
+          <option value="warn">WARN</option>
+          <option value="info">INFO</option>
+          <option value="debug">DEBUG</option>
         </select>
-        <select
-          value={categoryFilter}
-          onChange={(e) => setCategoryFilter(e.target.value)}
-          className="px-4 py-2 bg-noc-surface border border-noc-border rounded-lg text-sm text-noc-text"
-        >
-          <option value="all">全部类别</option>
-          <option value="system">系统</option>
-          <option value="security">安全</option>
-          <option value="operation">操作</option>
-          <option value="audit">审计</option>
-        </select>
-        <select
-          value={dateRange}
-          onChange={(e) => setDateRange(e.target.value)}
-          className="px-4 py-2 bg-noc-surface border border-noc-border rounded-lg text-sm text-noc-text"
-        >
-          <option value="today">今天</option>
-          <option value="yesterday">昨天</option>
-          <option value="week">本周</option>
-          <option value="month">本月</option>
-        </select>
-      </div>
-
-      {/* Log List */}
-      <div className="bg-noc-surface border border-noc-border rounded-lg overflow-hidden">
-        <div className="divide-y divide-noc-border">
-          {filteredLogs.map((log) => (
-            <div key={log.id} className="hover:bg-noc-bg-50 transition-colors">
-              <div
-                className="flex items-center gap-4 px-6 py-4 cursor-pointer"
-                onClick={() => setExpandedLog(expandedLog === log.id ? null : log.id)}
-              >
-                <div className="flex-shrink-0">
-                  {expandedLog === log.id ? (
-                    <ChevronDown className="w-4 h-4 text-noc-muted" />
-                  ) : (
-                    <ChevronRight className="w-4 h-4 text-noc-muted" />
-                  )}
-                </div>
-                <div className="flex-shrink-0">{getLevelIcon(log.level)}</div>
-                <div className="flex-shrink-0 w-20">
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${getLevelColor(log.level)}`}>
-                    {log.level.toUpperCase()}
-                  </span>
-                </div>
-                <div className="flex-shrink-0 w-16 text-xs text-noc-muted">{log.source}</div>
-                <div className="flex-shrink-0 w-12">
-                  <span className="flex items-center gap-1 text-xs text-noc-muted">
-                    {getCategoryIcon(log.category)}
-                    {getCategoryLabel(log.category)}
-                  </span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-noc-text">{log.action}</span>
-                    {log.status && getStatusIcon(log.status)}
-                  </div>
-                  <div className="text-xs text-noc-muted mt-0.5 truncate">{log.detail}</div>
-                </div>
-                <div className="flex-shrink-0 text-right">
-                  <div className="text-xs text-noc-muted flex items-center gap-1">
-                    <Clock className="w-3 h-3" />
-                    {log.timestamp}
-                  </div>
-                  {log.user && (
-                    <div className="text-xs text-noc-muted flex items-center gap-1 mt-0.5">
-                      <User className="w-3 h-3" />
-                      {log.user}
-                    </div>
-                  )}
-                </div>
-              </div>
-              {expandedLog === log.id && (
-                <div className="px-6 pb-4 pl-16">
-                  <div className="bg-noc-bg rounded-lg p-4 space-y-2">
-                    <div className="text-sm text-noc-text">{log.detail}</div>
-                    <div className="flex items-center gap-4 text-xs text-noc-muted">
-                      {log.ip && (
-                        <span className="flex items-center gap-1">
-                          <Network className="w-3 h-3" />
-                          IP: {log.ip}
-                        </span>
-                      )}
-                      {log.user && (
-                        <span className="flex items-center gap-1">
-                          <User className="w-3 h-3" />
-                          用户: {log.user}
-                        </span>
-                      )}
-                      <span className="flex items-center gap-1">
-                        <Database className="w-3 h-3" />
-                        来源: {log.source}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-
-        {filteredLogs.length === 0 && (
-          <div className="text-center py-12">
-            <FileText className="w-12 h-12 text-noc-muted mx-auto mb-4" />
-            <p className="text-noc-muted">未找到匹配的日志</p>
-          </div>
+        {tab === 'stream' && (
+          <>
+            <input
+              type="text"
+              placeholder="关键字过滤..."
+              value={streamFilter.keyword}
+              onChange={(e) => setStreamFilter((prev) => ({ ...prev, keyword: e.target.value }))}
+              className="px-3 py-2 bg-noc-surface border border-noc-border rounded-lg text-sm text-noc-text placeholder-noc-muted focus:outline-none focus:border-noc-accent w-40"
+            />
+            {streaming ? (
+              <button onClick={stopStream} className="flex items-center gap-2 px-4 py-2 bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg text-sm hover:bg-red-500/20 transition-colors">
+                <Square className="w-4 h-4" />停止
+              </button>
+            ) : (
+              <button onClick={startStream} className="flex items-center gap-2 px-4 py-2 bg-noc-accent text-white rounded-lg text-sm hover:opacity-90 transition-opacity">
+                <Play className="w-4 h-4" />开始监听
+              </button>
+            )}
+            {streaming && (
+              <span className="flex items-center gap-1.5 text-xs text-emerald-400">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                实时接收中 · {filteredStreamLogs.length} 行
+              </span>
+            )}
+          </>
         )}
+        <button onClick={() => {}} className="flex items-center gap-2 px-3 py-2 bg-noc-surface border border-noc-border rounded-lg text-sm text-noc-muted hover:text-noc-text transition-colors">
+          <Download className="w-4 h-4" />导出
+        </button>
       </div>
+
+      {/* Log list */}
+      {tab === 'stream' ? (
+        <div className="bg-noc-surface border border-noc-border rounded-lg overflow-hidden">
+          <div className="max-h-[600px] overflow-y-auto font-mono text-xs">
+            {filteredStreamLogs.length === 0 ? (
+              <div className="text-center py-12">
+                <Terminal className="w-10 h-10 text-noc-muted mx-auto mb-3" />
+                <p className="text-noc-muted">{streaming ? '等待日志数据...' : '点击「开始监听」启动实时日志流'}</p>
+                <p className="text-xs text-noc-muted mt-1">源: {currentSource?.name || selectedSource}</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-noc-border/50">
+                {filteredStreamLogs.map((log) => {
+                  const isExpanded = expandedLog === log.id;
+                  const hasContext = log.raw.length > 120 || log.raw.includes('\n');
+                  return (
+                    <div key={log.id}>
+                      <div
+                        className={`flex items-start gap-2 px-4 py-1.5 cursor-pointer transition-colors ${isExpanded ? 'bg-noc-bg' : 'hover:bg-noc-bg/50'}`}
+                        onClick={() => hasContext && setExpandedLog(isExpanded ? null : log.id)}
+                      >
+                        <span className="flex-shrink-0 w-4 mt-0.5">
+                          {hasContext && (isExpanded ? <ChevronDown className="w-3 h-3 text-noc-muted" /> : <ChevronRight className="w-3 h-3 text-noc-muted" />)}
+                        </span>
+                        <span className="flex-shrink-0 text-noc-muted w-36">{log.timestamp}</span>
+                        <span className={`flex-shrink-0 w-14 text-center px-1.5 py-0.5 rounded text-[10px] font-bold border ${getLevelColor(log.level)}`}>{log.level}</span>
+                        <span className="flex-1 min-w-0 break-all text-noc-text whitespace-pre-wrap">{highlightMessage(log.message)}</span>
+                      </div>
+                      {isExpanded && hasContext && (
+                        <div className="ml-6 mr-4 mb-2 p-3 bg-noc-bg rounded-lg border border-noc-border">
+                          <div className="text-[10px] text-noc-muted mb-1">完整日志:</div>
+                          <pre className="text-xs text-noc-text whitespace-pre-wrap break-all">{log.raw}</pre>
+                          <div className="mt-2 flex items-center gap-2">
+                            <button onClick={() => { navigate('/alarms'); }} className="flex items-center gap-1 text-[10px] text-noc-accent hover:underline">
+                              <ExternalLink className="w-3 h-3" />查看关联告警
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                <div ref={logEndRef} />
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="bg-noc-surface border border-noc-border rounded-lg p-12 text-center">
+          <FileText className="w-10 h-10 text-noc-muted mx-auto mb-3" />
+          <p className="text-noc-muted">历史日志查询</p>
+          <p className="text-xs text-noc-muted mt-1">切换到「实时流」标签查看 {currentSource?.name || selectedSource} 的实时日志</p>
+        </div>
+      )}
     </div>
   );
 }
