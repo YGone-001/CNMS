@@ -101,7 +101,7 @@ func main() {
 	h := handler.NewWithAllDB(mc, mysqlDB, scscfDB, cfg.LogDir, cfg.Auth)
 	wh := ws.NewWSHandler(mc, cfg.Notify.WebhookURL, cfg.Notify.MinLevel, cfg.Auth.Enabled)
 	lsh := ws.NewLogStreamHandler(cfg.LogDir, cfg.Auth.Enabled)
-	dwh := ws.NewDeploymentWSHandler(mc, scscfDB, cfg.Auth.Enabled)
+	dwh := ws.NewDeploymentWSHandler(mc, mysqlDB, scscfDB, cfg.Auth.Enabled)
 
 	// 启动定时任务调度器
 	sched := scheduler.New(mc)

@@ -21,6 +21,7 @@ import (
 // DeploymentWSHandler 部署状态 WebSocket 处理器
 type DeploymentWSHandler struct {
 	mongo       *mongo.Client
+	mysqlDB     *sql.DB
 	scscfDB     *sql.DB
 	probe       *monitor.Probe
 	authEnabled bool
@@ -28,9 +29,10 @@ type DeploymentWSHandler struct {
 }
 
 // NewDeploymentWSHandler 创建部署状态 WebSocket 处理器
-func NewDeploymentWSHandler(mc *mongo.Client, scscfDB *sql.DB, authEnabled bool) *DeploymentWSHandler {
+func NewDeploymentWSHandler(mc *mongo.Client, mysqlDB *sql.DB, scscfDB *sql.DB, authEnabled bool) *DeploymentWSHandler {
 	return &DeploymentWSHandler{
 		mongo:       mc,
+		mysqlDB:     mysqlDB,
 		scscfDB:     scscfDB,
 		authEnabled: authEnabled,
 		probe:       monitor.New(nil),
@@ -229,6 +231,14 @@ func (h *DeploymentWSHandler) pushBusinessMetrics(conn *websocket.Conn) {
 	epcOnlineUsers, err := getEPCOnlineUsersFromMetrics()
 	if err == nil {
 		metrics.EPCOnlineUsers = epcOnlineUsers
+	}
+
+	// 从 MySQL (hss_db) 获取总 IMS 用户数
+	if h.mysqlDB != nil {
+		var totalIMSUsers int64
+		if err := h.mysqlDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM hss_db.impi").Scan(&totalIMSUsers); err == nil {
+			metrics.TotalIMSUsers = totalIMSUsers
+		}
 	}
 
 	// 从 S-CSCF 获取 IMS 在线用户
