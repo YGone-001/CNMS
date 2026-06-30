@@ -11,6 +11,8 @@ import (
 // UEInfo UE 信息
 type UEInfo struct {
 	SUPI      string      `json:"supi"`
+	MSISDN    string      `json:"msisdn,omitempty"`
+	SIPURI    string      `json:"sip_uri,omitempty"`
 	Domain    string      `json:"domain"`
 	RAT       string      `json:"rat"`
 	CMState   string      `json:"cm_state"`
@@ -137,6 +139,37 @@ func (h *Handler) GetUEInfo(w http.ResponseWriter, r *http.Request) {
 					PDNCount: len(smfUE.PDN),
 				})
 			}
+		}
+	}
+
+	// 从 MySQL HSS 补充 MSISDN / SIP URI
+	if h.MySQLDB != nil {
+		for i, ue := range allUEs {
+			if ue.SUPI == "" {
+				continue
+			}
+			// 查询 tel: URI (MSISDN) 和 sip: URI
+			rows, err := h.MySQLDB.Query(`
+				SELECT u.identity FROM impi i
+				JOIN impi_impu ii ON ii.id_impi = i.id
+				JOIN impu u ON u.id = ii.id_impu
+				WHERE i.identity LIKE ? AND (u.identity LIKE 'tel:%' OR u.identity LIKE 'sip:%@ims.%')
+			`, ue.SUPI+"@%")
+			if err != nil {
+				continue
+			}
+			for rows.Next() {
+				var uri string
+				if rows.Scan(&uri) != nil {
+					continue
+				}
+				if len(uri) > 4 && uri[:4] == "tel:" && allUEs[i].MSISDN == "" {
+					allUEs[i].MSISDN = uri[4:]
+				} else if len(uri) > 4 && uri[:4] == "sip:" && allUEs[i].SIPURI == "" {
+					allUEs[i].SIPURI = uri
+				}
+			}
+			rows.Close()
 		}
 	}
 

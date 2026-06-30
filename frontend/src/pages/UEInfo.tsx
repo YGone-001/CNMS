@@ -9,12 +9,17 @@ import {
   Activity,
   Globe,
   Smartphone,
+  Phone,
+  Mail,
+  Circle,
 } from 'lucide-react';
 import { authFetch } from '@/App';
 
 // UE 信息类型
 interface UEInfo {
   supi: string;
+  msisdn?: string;
+  sip_uri?: string;
   domain: string;
   rat: string;
   cm_state: string;
@@ -243,18 +248,24 @@ export default function UEInfoPage() {
                     {getRATIcon(ue.rat)}
                   </div>
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-mono font-medium text-noc-text">
                         {ue.supi}
                       </span>
-                      <span className={`text-xs ${getStateColor(ue.mm_state)}`}>
-                        {ue.mm_state}
-                      </span>
-                      <span className={`text-xs ${getStateColor(ue.cm_state)}`}>
-                        {ue.cm_state}
-                      </span>
+                      {ue.msisdn && (
+                        <span className="inline-flex items-center gap-1 text-xs text-noc-accent bg-noc-accent/10 px-2 py-0.5 rounded">
+                          <Phone className="w-3 h-3" />{ue.msisdn}
+                        </span>
+                      )}
+                      {ue.sip_uri && (
+                        <span className="inline-flex items-center gap-1 text-xs text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded font-mono">
+                          <Mail className="w-3 h-3" />{ue.sip_uri.replace('sip:', '')}
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-4 mt-1 text-xs text-noc-muted">
+                      <span className={`font-medium ${getStateColor(ue.mm_state)}`}>{ue.mm_state || 'unknown'}</span>
+                      <span className={`font-medium ${getStateColor(ue.cm_state)}`}>{ue.cm_state || 'unknown'}</span>
                       <span>{ue.domain}</span>
                       <span>{ue.rat}</span>
                       {ue.enb && <span>eNB: {ue.enb.enb_id}</span>}
@@ -262,10 +273,14 @@ export default function UEInfoPage() {
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-noc-muted">
-                    {ue.pdn_count} 会话
-                  </span>
+                <div className="flex items-center gap-3">
+                  {/* Session status icon */}
+                  <div className="flex items-center gap-1.5" title={ue.pdn_count > 0 ? `${ue.pdn_count} 个活跃会话` : '无会话'}>
+                    <Circle className={`w-3 h-3 ${ue.pdn_count > 0 ? 'fill-emerald-400 text-emerald-400' : 'fill-gray-600 text-gray-600'}`} />
+                    <span className={`text-xs ${ue.pdn_count > 0 ? 'text-emerald-400' : 'text-noc-muted'}`}>
+                      {ue.pdn_count > 0 ? `${ue.pdn_count} 会话` : '无会话'}
+                    </span>
+                  </div>
                   {expandedUE === ue.supi ? (
                     <ChevronDown className="w-4 h-4 text-noc-muted" />
                   ) : (
@@ -283,9 +298,21 @@ export default function UEInfoPage() {
                       <h3 className="text-sm font-medium text-noc-muted mb-3">基本信息</h3>
                       <div className="space-y-2">
                         <div className="flex justify-between text-sm">
-                          <span className="text-noc-muted">SUPI</span>
+                          <span className="text-noc-muted">SUPI / IMSI</span>
                           <span className="text-noc-text font-mono">{ue.supi}</span>
                         </div>
+                        {ue.msisdn && (
+                          <div className="flex justify-between text-sm">
+                            <span className="text-noc-muted">手机号 (MSISDN)</span>
+                            <span className="text-noc-text font-mono flex items-center gap-1"><Phone className="w-3 h-3 text-noc-accent" />{ue.msisdn}</span>
+                          </div>
+                        )}
+                        {ue.sip_uri && (
+                          <div className="flex justify-between text-sm">
+                            <span className="text-noc-muted">SIP URI</span>
+                            <span className="text-noc-text font-mono text-xs truncate max-w-[200px]">{ue.sip_uri}</span>
+                          </div>
+                        )}
                         <div className="flex justify-between text-sm">
                           <span className="text-noc-muted">Domain</span>
                           <span className="text-noc-text">{ue.domain}</span>
@@ -296,11 +323,19 @@ export default function UEInfoPage() {
                         </div>
                         <div className="flex justify-between text-sm">
                           <span className="text-noc-muted">CM State</span>
-                          <span className={getStateColor(ue.cm_state)}>{ue.cm_state}</span>
+                          <span className={getStateColor(ue.cm_state)}>{ue.cm_state || 'unknown'}</span>
                         </div>
                         <div className="flex justify-between text-sm">
                           <span className="text-noc-muted">MM State</span>
-                          <span className={getStateColor(ue.mm_state)}>{ue.mm_state}</span>
+                          <span className={getStateColor(ue.mm_state)}>{ue.mm_state || 'unknown'}</span>
+                        </div>
+                        {/* IMS Registration Status */}
+                        <div className="flex justify-between text-sm">
+                          <span className="text-noc-muted">IMS 注册</span>
+                          <span className={`flex items-center gap-1.5 ${ue.sip_uri ? 'text-emerald-400' : 'text-gray-500'}`}>
+                            <Circle className={`w-2.5 h-2.5 ${ue.sip_uri ? 'fill-emerald-400' : 'fill-gray-500'}`} />
+                            {ue.sip_uri ? '已注册' : '未注册'}
+                          </span>
                         </div>
                       </div>
                     </div>
