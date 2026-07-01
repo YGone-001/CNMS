@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Wifi,
   WifiOff,
@@ -16,7 +16,19 @@ import {
   Download,
   Upload,
   Terminal,
+  ChevronDown,
+  ChevronRight,
+  RotateCcw,
+  Link2,
+  Zap,
 } from 'lucide-react';
+
+interface AgentNF {
+  name: string;
+  status: 'running' | 'stopped';
+  cpu: number;
+  memory: string;
+}
 
 interface Agent {
   id: string;
@@ -32,6 +44,7 @@ interface Agent {
   lastSeen: string;
   version: string;
   nfCount: number;
+  nfs: AgentNF[];
 }
 
 export default function AgentManagement() {
@@ -39,6 +52,8 @@ export default function AgentManagement() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
+  const [reconnecting, setReconnecting] = useState<string | null>(null);
 
   const fetchAgents = useCallback(async () => {
     setLoading(true);
@@ -59,6 +74,11 @@ export default function AgentManagement() {
           lastSeen: '2024-01-15 10:30:00',
           version: 'v1.2.0',
           nfCount: 3,
+          nfs: [
+            { name: 'amfd', status: 'running', cpu: 12.3, memory: '256 MB' },
+            { name: 'ausfd', status: 'running', cpu: 8.1, memory: '192 MB' },
+            { name: 'nssfd', status: 'running', cpu: 5.2, memory: '128 MB' },
+          ],
         },
         {
           id: '2',
@@ -74,6 +94,10 @@ export default function AgentManagement() {
           lastSeen: '2024-01-15 10:29:45',
           version: 'v1.2.0',
           nfCount: 2,
+          nfs: [
+            { name: 'smfd', status: 'running', cpu: 15.7, memory: '320 MB' },
+            { name: 'upfd', status: 'running', cpu: 9.4, memory: '512 MB' },
+          ],
         },
         {
           id: '3',
@@ -89,6 +113,12 @@ export default function AgentManagement() {
           lastSeen: '2024-01-15 10:28:30',
           version: 'v1.1.8',
           nfCount: 4,
+          nfs: [
+            { name: 'pgwcd', status: 'running', cpu: 22.1, memory: '384 MB' },
+            { name: 'pgwud', status: 'running', cpu: 35.6, memory: '768 MB' },
+            { name: 'sgwcd', status: 'running', cpu: 11.8, memory: '256 MB' },
+            { name: 'sgwud', status: 'running', cpu: 19.5, memory: '512 MB' },
+          ],
         },
         {
           id: '4',
@@ -103,7 +133,11 @@ export default function AgentManagement() {
           uptime: '-',
           lastSeen: '2024-01-14 18:45:00',
           version: 'v1.1.5',
-          nfCount: 0,
+          nfCount: 2,
+          nfs: [
+            { name: 'nrfd', status: 'stopped', cpu: 0, memory: '0 MB' },
+            { name: 'pcfd', status: 'stopped', cpu: 0, memory: '0 MB' },
+          ],
         },
       ];
       setAgents(mockAgents);
@@ -160,6 +194,24 @@ export default function AgentManagement() {
     if (value >= 90) return 'bg-red-500';
     if (value >= 70) return 'bg-amber-500';
     return 'bg-emerald-500';
+  };
+
+  // 高资源使用告警关联
+  const getResourceAlarms = (agent: Agent): string[] => {
+    const alarms: string[] = [];
+    if (agent.cpu >= 80) alarms.push(`CPU ${agent.cpu}% 超过阈值`);
+    if (agent.memory >= 80) alarms.push(`内存 ${agent.memory}% 超过阈值`);
+    if (agent.disk >= 80) alarms.push(`磁盘 ${agent.disk}% 超过阈值`);
+    return alarms;
+  };
+
+  // 重新连接 Agent
+  const handleReconnect = async (agentId: string) => {
+    setReconnecting(agentId);
+    // 模拟重连
+    await new Promise(r => setTimeout(r, 2000));
+    setAgents(prev => prev.map(a => a.id === agentId ? { ...a, status: 'online' as const, lastSeen: new Date().toISOString().slice(0, 19).replace('T', ' ') } : a));
+    setReconnecting(null);
   };
 
   return (
@@ -280,7 +332,8 @@ export default function AgentManagement() {
             </thead>
             <tbody className="divide-y divide-noc-border">
               {filteredAgents.map((agent) => (
-                <tr key={agent.id} className="hover:bg-noc-bg-50 transition-colors">
+                <React.Fragment key={agent.id}>
+                <tr className="hover:bg-noc-bg-50 transition-colors">
                   <td className="px-6 py-4">
                     <div>
                       <div className="text-sm font-medium text-noc-text">{agent.hostname}</div>
@@ -308,6 +361,17 @@ export default function AgentManagement() {
                       <Clock className="w-3 h-3 inline mr-1" />
                       {agent.lastSeen}
                     </div>
+                    {/* 告警关联 */}
+                    {getResourceAlarms(agent).length > 0 && (
+                      <div className="mt-1.5 space-y-0.5">
+                        {getResourceAlarms(agent).map((alarm, i) => (
+                          <div key={i} className="flex items-center gap-1 text-[10px] text-amber-400">
+                            <Zap className="w-2.5 h-2.5" />
+                            {alarm}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </td>
                   <td className="px-6 py-4">
                     <div className="space-y-2 min-w-[120px]">
@@ -347,25 +411,62 @@ export default function AgentManagement() {
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <div className="text-sm text-noc-text">{agent.nfCount} 个</div>
+                    <button
+                      onClick={() => setExpandedAgent(expandedAgent === agent.id ? null : agent.id)}
+                      className="flex items-center gap-1 text-sm text-noc-accent hover:underline"
+                    >
+                      {expandedAgent === agent.id ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                      {agent.nfCount} 个
+                    </button>
                   </td>
                   <td className="px-6 py-4">
                     <div className="text-sm text-noc-text">{agent.uptime}</div>
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
+                      {agent.status === 'offline' && (
+                        <button
+                          onClick={() => handleReconnect(agent.id)}
+                          disabled={reconnecting === agent.id}
+                          className="p-1.5 rounded-md text-noc-accent hover:bg-noc-accent/10 transition-colors disabled:opacity-50"
+                          title="重新连接"
+                        >
+                          <RotateCcw className={`w-4 h-4 ${reconnecting === agent.id ? 'animate-spin' : ''}`} />
+                        </button>
+                      )}
                       <button className="p-1.5 rounded-md text-noc-muted hover:text-noc-text hover:bg-noc-bg-50 transition-colors" title="终端">
                         <Terminal className="w-4 h-4" />
                       </button>
                       <button className="p-1.5 rounded-md text-noc-muted hover:text-noc-text hover:bg-noc-bg-50 transition-colors" title="配置">
                         <Settings className="w-4 h-4" />
                       </button>
-                      <button className="p-1.5 rounded-md text-noc-muted hover:text-noc-text hover:bg-noc-bg-50 transition-colors" title="上传配置">
-                        <Upload className="w-4 h-4" />
-                      </button>
                     </div>
                   </td>
                 </tr>
+                {/* Expanded NF list */}
+                {expandedAgent === agent.id && (
+                  <tr>
+                    <td colSpan={7} className="px-6 py-3 bg-noc-bg/50">
+                      <div className="pl-4 space-y-1">
+                        <div className="text-xs text-noc-muted mb-2 flex items-center gap-1">
+                          <Link2 className="w-3 h-3" /> {agent.hostname} 上运行的 NF：
+                        </div>
+                        {agent.nfs.map((nf) => (
+                          <div key={nf.name} className="flex items-center gap-4 text-xs py-1">
+                            <span className={`w-2 h-2 rounded-full ${nf.status === 'running' ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                            <span className="text-noc-text font-mono w-16">{nf.name}</span>
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] ${nf.status === 'running' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
+                              {nf.status === 'running' ? '运行中' : '已停止'}
+                            </span>
+                            <span className="text-noc-muted">CPU: {nf.cpu}%</span>
+                            <span className="text-noc-muted">MEM: {nf.memory}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                </React.Fragment>
               ))}
             </tbody>
           </table>
