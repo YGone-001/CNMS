@@ -14,6 +14,7 @@ import {
   Users,
   RotateCcw,
   FileText,
+  Clock,
 } from 'lucide-react';
 import SummaryCard from '@/components/SummaryCard';
 import { formatBytes, formatPercent } from '@/utils/format';
@@ -50,6 +51,8 @@ export default function Overview() {
   const [criticalAlarms, setCriticalAlarms] = useState<Array<{id: string; source: string; message: string; severity: string; timestamp: string}>>([]);
   const [restarting, setRestarting] = useState<string | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [uptime, setUptime] = useState<string>('');
+  const [version, setVersion] = useState<string>('');
 
   // 获取部署模板列表
   const fetchTemplates = useCallback(async () => {
@@ -103,6 +106,27 @@ export default function Overview() {
       setLoading(false);
     }
   }, [wsStatus]);
+
+  // 获取系统运行时长
+  const fetchUptime = useCallback(async () => {
+    try {
+      const resp = await fetch('/api/health');
+      const data = await resp.json();
+      if (data.uptime) {
+        setUptime(formatUptime(data.uptime));
+        setVersion(data.version || '');
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  // 格式化 uptime: "15h49m12.62994146s" → "15h49m"
+  function formatUptime(raw: string): string {
+    const match = raw.match(/(\d+)h(\d+)m/);
+    if (match) return `${match[1]}h${match[2]}m`;
+    const minMatch = raw.match(/(\d+)m/);
+    if (minMatch) return `${minMatch[1]}m`;
+    return raw.replace(/\.\d+s$/, 's');
+  }
 
   // 重启网元
   const restartNF = useCallback(async (name: string) => {
@@ -188,12 +212,13 @@ export default function Overview() {
   // 初始化：获取模板列表和初始数据
   useEffect(() => {
     fetchTemplates();
+    fetchUptime();
     // 仅在 WebSocket 未连接时使用 HTTP 轮询
     if (wsStatus !== 'CONNECTED') {
       fetchDeploymentStatus();
       fetchBusinessMetrics();
     }
-  }, [fetchTemplates, fetchDeploymentStatus, fetchBusinessMetrics, wsStatus]);
+  }, [fetchTemplates, fetchDeploymentStatus, fetchBusinessMetrics, fetchUptime, wsStatus]);
 
   // 备用轮询：当 WebSocket 断开时，每 30 秒轮询一次
   useEffect(() => {
@@ -429,7 +454,7 @@ export default function Overview() {
       </div>
 
       {/* 业务指标卡片 */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <SummaryCard
           title="EPC/5GC 在线用户"
           value={businessMetrics?.epc_online_users ?? 0}
@@ -443,6 +468,13 @@ export default function Overview() {
           icon={Users}
           accentColor="text-emerald-400"
           subtitle={`总用户: ${businessMetrics?.total_ims_users ?? 0}`}
+        />
+        <SummaryCard
+          title="系统运行时长"
+          value={uptime || '-'}
+          icon={Clock}
+          accentColor="text-purple-400"
+          subtitle={version ? `v${version}` : ''}
         />
       </div>
 
