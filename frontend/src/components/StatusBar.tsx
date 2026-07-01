@@ -4,24 +4,24 @@ import { useTheme } from '@/context/ThemeContext';
 import { useI18n } from '@/i18nContext';
 import { Sun, Moon } from 'lucide-react';
 
-// 路径 → 页面名称映射
-const PAGE_TITLES: Record<string, string> = {
-  '/': '总览',
-  '/topology': '拓扑',
-  '/elements': '网元管理',
-  '/agents': 'Agent 管理',
-  '/ue-info': 'UE 信息',
-  '/metrics': '指标历史',
-  '/alarms': '告警中心',
-  '/fault-diagnosis': '故障诊断',
-  '/fault-resolution': '故障处置',
-  '/logs': '日志中心',
-  '/backups': '配置备份',
-  '/tasks': '定时任务',
-  '/kb': '知识库',
-  '/reports': '报表',
-  '/settings': '系统设置',
-  '/docs': 'API 文档',
+// 路径 → i18n key 映射
+const PAGE_I18N: Record<string, string> = {
+  '/': 'nav.overview',
+  '/topology': 'nav.topology',
+  '/elements': 'nav.networkElements',
+  '/agents': 'nav.agentManagement',
+  '/ue-info': 'nav.ueInfo',
+  '/metrics': 'nav.metricsHistory',
+  '/alarms': 'nav.alarms',
+  '/fault-diagnosis': 'nav.faultDiagnosis',
+  '/fault-resolution': 'nav.faultResolution',
+  '/logs': 'nav.logCenter',
+  '/backups': 'nav.configBackups',
+  '/tasks': 'nav.scheduledTasks',
+  '/kb': 'nav.knowledgeBase',
+  '/reports': 'nav.reports',
+  '/settings': 'nav.systemSettings',
+  '/docs': 'nav.apiDocs',
 };
 
 export default function StatusBar() {
@@ -33,10 +33,9 @@ export default function StatusBar() {
   // 获取当前页面名称（支持子路径如 /kb/xxx → 知识库）
   const pageTitle = (() => {
     const path = location.pathname;
-    if (PAGE_TITLES[path]) return PAGE_TITLES[path];
-    // 子路径匹配：/kb/xxx → 知识库，/logs?source=xxx → 日志中心
+    if (PAGE_I18N[path]) return t(PAGE_I18N[path]);
     const base = '/' + path.split('/')[1];
-    return PAGE_TITLES[base] || path;
+    return PAGE_I18N[base] ? t(PAGE_I18N[base]) : path;
   })();
 
   // Status indicator style mapping
