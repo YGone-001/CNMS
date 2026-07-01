@@ -6,11 +6,15 @@ import MarkdownViewer from '@/components/MarkdownViewer';
 import type { KbAttachment } from '@/types/monitor';
 
 const CATEGORIES = [
-  { id: 'Signaling', name: 'Signaling' },
-  { id: 'Deployment', name: 'Deployment' },
-  { id: 'Process', name: 'Process' },
-  { id: 'Config', name: 'Config' },
-  { id: 'Hardware', name: 'Hardware' },
+  { id: 'SIP', name: 'SIP' },
+  { id: 'Diameter', name: 'Diameter' },
+  { id: 'GTP', name: 'GTP' },
+  { id: 'HTTP/2', name: 'HTTP/2' },
+  { id: 'VoLTE', name: 'VoLTE' },
+  { id: '5G SA', name: '5G SA' },
+  { id: 'NAS', name: 'NAS' },
+  { id: 'PFCP', name: 'PFCP' },
+  { id: 'General', name: 'General' },
 ];
 
 interface FormData {
@@ -242,14 +246,66 @@ export default function KnowledgeBaseEdit() {
                 <MarkdownViewer content={formData.solution} />
               </div>
             ) : (
-              <textarea
-                required
-                rows={15}
-                className="w-full p-5 outline-none font-mono text-sm leading-relaxed bg-transparent text-noc-text placeholder:text-noc-muted"
-                value={formData.solution}
-                onChange={(e) => setFormData({ ...formData, solution: e.target.value })}
-                placeholder="Write your solution in Markdown..."
-              />
+              <>
+                {/* Markdown Toolbar */}
+                <div className="flex items-center gap-0.5 px-3 py-1.5 border-b border-noc-border bg-noc-bg/50">
+                  {[
+                    { label: 'B', title: '粗体', wrap: '**' },
+                    { label: 'I', title: '斜体', wrap: '*' },
+                    { label: '~', title: '删除线', wrap: '~~' },
+                    { label: 'H1', title: '一级标题', prefix: '# ' },
+                    { label: 'H2', title: '二级标题', prefix: '## ' },
+                    { label: 'H3', title: '三级标题', prefix: '### ' },
+                    { label: '</>', title: '行内代码', wrap: '`' },
+                    { label: '::', title: '代码块', wrap: '```\n', wrapEnd: '\n```' },
+                    { label: '•', title: '无序列表', prefix: '- ' },
+                    { label: '1.', title: '有序列表', prefix: '1. ' },
+                    { label: '>', title: '引用', prefix: '> ' },
+                    { label: '—', title: '分隔线', prefix: '---\n' },
+                    { label: '🔗', title: '链接', wrap: '[', wrapEnd: '](url)' },
+                  ].map((btn) => (
+                    <button
+                      key={btn.label}
+                      type="button"
+                      title={btn.title}
+                      onClick={() => {
+                        const ta = document.querySelector('textarea[data-md-editor]') as HTMLTextAreaElement;
+                        if (!ta) return;
+                        const start = ta.selectionStart;
+                        const end = ta.selectionEnd;
+                        const selected = formData.solution.substring(start, end);
+                        let newText: string;
+                        let newCursor: number;
+                        if (btn.wrap) {
+                          const we = btn.wrapEnd || btn.wrap;
+                          newText = formData.solution.substring(0, start) + btn.wrap + selected + we + formData.solution.substring(end);
+                          newCursor = start + btn.wrap.length + selected.length + we.length;
+                        } else if (btn.prefix) {
+                          const lineStart = formData.solution.lastIndexOf('\n', start - 1) + 1;
+                          newText = formData.solution.substring(0, lineStart) + btn.prefix + formData.solution.substring(lineStart);
+                          newCursor = start + btn.prefix.length;
+                        } else {
+                          return;
+                        }
+                        setFormData({ ...formData, solution: newText });
+                        setTimeout(() => { ta.focus(); ta.setSelectionRange(newCursor, newCursor); }, 0);
+                      }}
+                      className="px-2 py-1 text-xs font-mono font-bold text-noc-muted hover:text-noc-text hover:bg-noc-surface rounded transition-colors"
+                    >
+                      {btn.label}
+                    </button>
+                  ))}
+                </div>
+                <textarea
+                  required
+                  rows={15}
+                  data-md-editor
+                  className="w-full p-5 outline-none font-mono text-sm leading-relaxed bg-transparent text-noc-text placeholder:text-noc-muted"
+                  value={formData.solution}
+                  onChange={(e) => setFormData({ ...formData, solution: e.target.value })}
+                  placeholder="使用 Markdown 编写排障文档...&#10;&#10;## 现象&#10;描述故障现象...&#10;&#10;## 根因&#10;分析根本原因...&#10;&#10;## 解决方案&#10;1. 步骤一&#10;2. 步骤二"
+                />
+              </>
             )}
           </div>
         </div>
@@ -283,7 +339,7 @@ export default function KnowledgeBaseEdit() {
                 className="w-full p-2 bg-noc-bg border border-noc-border rounded-lg outline-none focus:border-noc-accent transition-colors text-sm text-noc-text"
                 value={formData.tags}
                 onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
-                placeholder="SIP, VoLTE, 5G..."
+                placeholder="SIP, VoLTE, 5G SA, 注册失败, 无声音..."
               />
             </div>
           </div>
