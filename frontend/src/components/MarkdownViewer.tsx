@@ -2,7 +2,9 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneLight } from 'react-syntax-highlighter/dist/cjs/styles/prism';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/cjs/styles/prism';
 import type { Components } from 'react-markdown';
+import { useTheme } from '@/context/ThemeContext';
 
 interface MarkdownViewerProps {
   content: string;
@@ -10,6 +12,8 @@ interface MarkdownViewerProps {
 }
 
 export default function MarkdownViewer({ content, onImageClick }: MarkdownViewerProps) {
+  const { theme } = useTheme();
+  const codeStyle = theme === 'dark' ? vscDarkPlus : oneLight;
   // 预处理内容：将行首空格替换为 Non-Breaking Space，保留缩进
   const processedContent = (content || '').replace(/^ +/gm, (match) => {
     return match.replace(/ /g, ' ');
@@ -28,7 +32,7 @@ export default function MarkdownViewer({ content, onImageClick }: MarkdownViewer
       }
       return (
         <SyntaxHighlighter
-          style={oneLight as Record<string, React.CSSProperties>}
+          style={codeStyle as Record<string, React.CSSProperties>}
           language={match[1]}
           PreTag="div"
           className="rounded-lg border border-noc-border shadow-sm bg-noc-bg !m-0 my-2"
