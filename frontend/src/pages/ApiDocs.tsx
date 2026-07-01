@@ -1,5 +1,6 @@
-import { useState } from 'react';
-import { ExternalLink, Copy, Check } from 'lucide-react';
+import { useState, useCallback } from 'react';
+import { ExternalLink, Copy, Check, Play, Loader2, X } from 'lucide-react';
+import { authFetch } from '@/App';
 
 interface Endpoint {
   method: string;
@@ -30,7 +31,7 @@ const MML_COMMANDS = [
 const ENDPOINTS: Endpoint[] = [
   { method: 'GET', path: '/api/health', tag: 'System', summary: 'Health check' },
   { method: 'POST', path: '/api/v1/auth/login', tag: 'Auth', summary: 'User login',
-    body: [{ field: 'username', type: 'string', required: true, example: 'admin' }, { field: 'password', type: 'string', required: true, example: 'admin123' }] },
+    body: [{ field: 'username', type: 'string', required: true, example: 'admin' }, { field: 'password', type: 'string', required: true }] },
   { method: 'POST', path: '/api/v1/mml/execute', tag: 'MML', summary: 'Execute MML command',
     body: [{ field: 'command', type: 'string', required: true, example: 'LST-SUB:;' }] },
   { method: 'GET', path: '/api/v1/monitor/ws', tag: 'Monitor', summary: 'WebSocket real-time monitoring stream' },
@@ -82,11 +83,124 @@ const methodColor: Record<string, string> = {
   DELETE: 'bg-noc-error-10 text-noc-error',
 };
 
+// Try-it panel state
+interface TryItState {
+  endpoint: Endpoint;
+  params: Record<string, string>;
+  body: string;
+  loading: boolean;
+  result: { status: number; body: string } | null;
+}
+
+function TryItPanel({ state, onClose, onExecute }: { state: TryItState; onClose: () => void; onExecute: () => void }) {
+  const ep = state.endpoint;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-noc-surface border border-noc-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-noc-border">
+          <div className="flex items-center gap-2">
+            <span className={`px-2 py-0.5 rounded text-xs font-bold ${methodColor[ep.method]}`}>{ep.method}</span>
+            <code className="text-sm text-noc-accent font-mono">{ep.path}</code>
+          </div>
+          <button onClick={onClose} className="p-1 text-noc-muted hover:text-noc-text"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="p-5 space-y-4 overflow-y-auto max-h-[60vh]">
+          {/* Query params */}
+          {ep.params && ep.params.length > 0 && (
+            <div>
+              <div className="text-xs font-medium text-noc-muted mb-2">Query Parameters</div>
+              <div className="space-y-2">
+                {ep.params.map((p) => (
+                  <div key={p.name} className="flex items-center gap-2">
+                    <label className="w-28 text-xs text-noc-muted font-mono">{p.name}{p.required && <span className="text-noc-error">*</span>}</label>
+                    <input
+                      type="text"
+                      placeholder={p.description || p.type}
+                      value={state.params[p.name] || ''}
+                      onChange={(e) => { state.params[p.name] = e.target.value; }}
+                      className="flex-1 px-2 py-1 bg-noc-bg border border-noc-border rounded text-xs text-noc-text font-mono focus:outline-none focus:border-noc-accent"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {/* Body */}
+          {ep.body && ep.body.length > 0 && (
+            <div>
+              <div className="text-xs font-medium text-noc-muted mb-2">Request Body (JSON)</div>
+              <textarea
+                rows={4}
+                className="w-full px-3 py-2 bg-noc-bg border border-noc-border rounded text-xs text-noc-text font-mono focus:outline-none focus:border-noc-accent"
+                value={state.body}
+                onChange={(e) => { state.body = e.target.value; }}
+                placeholder={JSON.stringify(Object.fromEntries(ep.body.map(b => [b.field, b.example || ''])), null, 2)}
+              />
+            </div>
+          )}
+          {/* Execute */}
+          <button
+            onClick={onExecute}
+            disabled={state.loading}
+            className="flex items-center gap-2 px-4 py-2 bg-noc-accent text-white rounded-lg text-sm hover:opacity-90 disabled:opacity-50"
+          >
+            {state.loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+            {state.loading ? 'Sending...' : 'Send Request'}
+          </button>
+          {/* Response */}
+          {state.result && (
+            <div>
+              <div className="text-xs font-medium text-noc-muted mb-2">
+                Response
+                <span className={`ml-2 px-2 py-0.5 rounded text-xs font-mono ${state.result.status < 400 ? 'bg-noc-success-10 text-noc-success' : 'bg-noc-error-10 text-noc-error'}`}>
+                  {state.result.status}
+                </span>
+              </div>
+              <pre className="p-3 bg-noc-bg border border-noc-border rounded text-xs text-noc-text font-mono overflow-x-auto max-h-48 overflow-y-auto whitespace-pre-wrap">
+                {state.result.body}
+              </pre>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ApiDocs() {
   const [activeTag, setActiveTag] = useState<string>('all');
+  const [tryIt, setTryIt] = useState<TryItState | null>(null);
   const tags = ['all', ...new Set(ENDPOINTS.map(e => e.tag))];
 
   const filtered = activeTag === 'all' ? ENDPOINTS : ENDPOINTS.filter(e => e.tag === activeTag);
+
+  const openTryIt = (ep: Endpoint) => {
+    const params: Record<string, string> = {};
+    ep.params?.forEach(p => { params[p.name] = ''; });
+    setTryIt({ endpoint: ep, params, body: '', loading: false, result: null });
+  };
+
+  const executeTryIt = useCallback(async () => {
+    if (!tryIt) return;
+    setTryIt(prev => prev ? { ...prev, loading: true, result: null } : null);
+    try {
+      const ep = tryIt.endpoint;
+      const query = Object.entries(tryIt.params).filter(([, v]) => v).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+      const url = query ? `${ep.path}?${query}` : ep.path;
+      const opts: RequestInit = { method: ep.method };
+      if (tryIt.body && (ep.method === 'POST' || ep.method === 'PUT')) {
+        opts.headers = { 'Content-Type': 'application/json' };
+        opts.body = tryIt.body;
+      }
+      const resp = await authFetch(url, opts);
+      const text = await resp.text();
+      let formatted = text;
+      try { formatted = JSON.stringify(JSON.parse(text), null, 2); } catch {}
+      setTryIt(prev => prev ? { ...prev, loading: false, result: { status: resp.status, body: formatted } } : null);
+    } catch (err) {
+      setTryIt(prev => prev ? { ...prev, loading: false, result: { status: 0, body: `Error: ${err}` } } : null);
+    }
+  }, [tryIt]);
 
   return (
     <div className="space-y-6">
@@ -116,6 +230,14 @@ export default function ApiDocs() {
               <code className="text-sm text-noc-accent font-mono">{ep.path}</code>
               <CopyButton text={ep.path} />
               <span className="text-sm text-noc-text ml-auto">{ep.summary}</span>
+              {ep.method !== 'GET' || ep.params ? (
+                <button
+                  onClick={() => openTryIt(ep)}
+                  className="flex items-center gap-1 px-2 py-1 bg-noc-accent/10 text-noc-accent text-xs rounded hover:bg-noc-accent/20 transition-colors"
+                >
+                  <Play className="w-3 h-3" /> Try it
+                </button>
+              ) : null}
             </div>
             {ep.description && <p className="text-xs text-noc-muted mb-2">{ep.description}</p>}
             {ep.params && ep.params.length > 0 && (
@@ -173,6 +295,9 @@ export default function ApiDocs() {
           </table>
         </div>
       </div>
+
+      {/* Try-it modal */}
+      {tryIt && <TryItPanel state={tryIt} onClose={() => setTryIt(null)} onExecute={executeTryIt} />}
     </div>
   );
 }
