@@ -332,14 +332,27 @@ func (lsh *LogStreamHandler) findLogFile(name string) string {
 			}
 		}
 
-		// 模糊匹配：文件名包含关键字（如 cscf-2026-06-30.log 匹配 "cscf"）
+		// 模糊匹配：文件名包含关键字（如 pcscf-2026-07-01.log 匹配 "pcscf"）
+		// 日期滚动文件优先返回最新的（今天日期）
 		if entries, err := os.ReadDir(dir); err == nil {
 			for _, sname := range searchNames {
 				lowerName := strings.ToLower(sname)
+				today := time.Now().Format("2006-01-02")
+				var fallback string
 				for _, e := range entries {
 					if !e.IsDir() && strings.HasSuffix(e.Name(), ".log") && strings.Contains(strings.ToLower(e.Name()), lowerName) {
-						return filepath.Join(dir, e.Name())
+						path := filepath.Join(dir, e.Name())
+						// 优先匹配今天的日志文件
+						if strings.Contains(e.Name(), today) {
+							return path
+						}
+						if fallback == "" {
+							fallback = path
+						}
 					}
+				}
+				if fallback != "" {
+					return fallback
 				}
 			}
 		}
@@ -413,7 +426,6 @@ func (lsh *LogStreamHandler) GetLogFiles(w http.ResponseWriter, r *http.Request)
 	seen := make(map[string]bool)
 
 	for _, dir := range lsh.allLogDirs() {
-		dirBase := filepath.Base(dir)
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			continue
@@ -441,28 +453,31 @@ func (lsh *LogStreamHandler) GetLogFiles(w http.ResponseWriter, r *http.Request)
 				}
 			} else if strings.HasSuffix(e.Name(), ".log") {
 				name := strings.TrimSuffix(e.Name(), ".log")
-				// 日期格式日志(如 hss-2026-06-30.log): 去日期后若与其他目录文件冲突, 用目录名
+				// 日期格式日志(如 pcscf-2026-07-01.log): 用文件前缀作为名称
 				if idx := strings.LastIndex(name, "-20"); idx > 0 {
-					stripped := name[:idx]
-					if seen[stripped] {
-						name = dirBase
-					} else {
-						name = stripped
-					}
+					name = name[:idx]
 				}
 				path := filepath.Join(dir, e.Name())
-				if seen[path] {
+				info, _ := e.Info()
+				entry := LogStreamStats{Name: name, Path: path, Size: info.Size(), ModTime: info.ModTime().Format(time.RFC3339)}
+
+				if seen[name] {
+					// 同名文件已存在：如果当前是今天的而已有不是，替换
+					today := time.Now().Format("2006-01-02")
+					if strings.Contains(e.Name(), today) {
+						// 替换旧文件
+						for i, f := range files {
+							if f.Name == name {
+								files[i] = entry
+								break
+							}
+						}
+					}
 					continue
 				}
+				seen[name] = true
 				seen[path] = true
-				seen[name] = true // 标记名称已使用, 后续同名文件用目录名
-				info, _ := e.Info()
-				files = append(files, LogStreamStats{
-					Name:    name,
-					Path:    path,
-					Size:    info.Size(),
-					ModTime: info.ModTime().Format(time.RFC3339),
-				})
+				files = append(files, entry)
 			}
 		}
 	}
