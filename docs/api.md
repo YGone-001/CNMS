@@ -1,6 +1,6 @@
 # API 文档
 
-xCloud-CNMS RESTful API 接口文档。
+xCloud-CNMS RESTful API 接口文档（v1.4.1）。
 
 ---
 
@@ -14,15 +14,23 @@ xCloud-CNMS RESTful API 接口文档。
   - [认证](#认证-1)
   - [监控](#监控)
   - [告警](#告警)
+  - [告警规则](#告警规则)
+  - [通知](#通知)
   - [订户](#订户)
   - [站点](#站点)
   - [任务](#任务)
   - [用户](#用户)
   - [日志](#日志)
+  - [指标](#指标)
   - [备份](#备份)
   - [知识库](#知识库)
   - [AIOps](#aiops)
+  - [报表](#报表)
+  - [部署](#部署)
+  - [NF 发现](#nf-发现)
   - [MML](#mml)
+- [WebSocket API](#websocket-api)
+- [RBAC 权限](#rbac-权限)
 
 ---
 
@@ -34,6 +42,7 @@ xCloud-CNMS RESTful API 接口文档。
 - **协议**: HTTP/1.1, HTTP/2
 - **格式**: JSON
 - **字符集**: UTF-8
+- **限流**: 20 req/s, burst 40
 
 ### 请求头
 
@@ -99,6 +108,10 @@ xCloud-CNMS RESTful API 接口文档。
 Authorization: Bearer <token>
 ```
 
+WebSocket 认证支持两种方式：
+- Query param: `?token=<token>`
+- Header: `Authorization: Bearer <token>`
+
 ### Token 过期
 
 - **默认过期时间**: 24 小时
@@ -142,6 +155,18 @@ Authorization: Bearer <token>
 ### 系统
 
 #### 健康检查
+
+```http
+GET /healthz
+```
+
+轻量级健康检查，无依赖。
+
+```http
+GET /readyz
+```
+
+就绪检查，验证 MongoDB 连接。
 
 ```http
 GET /api/health
@@ -221,7 +246,7 @@ Upgrade: websocket
 
 | 类型 | 说明 |
 |------|------|
-| `metrics` | 实时指标数据 |
+| `metrics` | 实时指标数据（2s 间隔） |
 | `alarm` | 告警通知 |
 | `process` | 进程状态变更 |
 
@@ -238,34 +263,7 @@ Upgrade: websocket
     "status": "running",
     "uptime": "24h30m"
   },
-  "timestamp": "2026-06-24T10:30:00Z"
-}
-```
-
-#### 获取进程列表
-
-```http
-GET /api/v1/monitor/processes
-```
-
-**响应:**
-
-```json
-{
-  "code": 200,
-  "message": "success",
-  "data": [
-    {
-      "name": "amfd",
-      "pid": 12345,
-      "status": "running",
-      "cpu": 45.2,
-      "memory": 62.8,
-      "disk": 38.5,
-      "uptime": "24h30m",
-      "start_time": "2026-06-23T10:00:00Z"
-    }
-  ]
+  "timestamp": "2026-07-01T10:30:00Z"
 }
 ```
 
@@ -303,9 +301,10 @@ GET /api/v1/alarms?page=1&page_size=20&status=active&severity=major
         "severity": "major",
         "message": "CPU usage high",
         "status": "active",
+        "count": 3,
         "root_cause_id": null,
-        "created_at": "2026-06-24T10:30:00Z",
-        "updated_at": "2026-06-24T10:30:00Z"
+        "created_at": "2026-07-01T10:30:00Z",
+        "updated_at": "2026-07-01T10:30:00Z"
       }
     ],
     "total": 50,
@@ -315,46 +314,112 @@ GET /api/v1/alarms?page=1&page_size=20&status=active&severity=major
 }
 ```
 
-#### 确认告警
+> **去重机制**: 同 source + severity 的未关闭告警不会新建，而是递增 `count` 字段。
+
+---
+
+### 告警规则
+
+#### 获取告警规则列表
 
 ```http
-POST /api/v1/alarms/:id/acknowledge
+GET /api/v1/alarm-rules
 ```
 
-**响应:**
+#### 创建告警规则
+
+```http
+POST /api/v1/alarm-rules
+```
+
+**请求体:**
 
 ```json
 {
-  "code": 200,
-  "message": "success",
-  "data": {
-    "id": "60d5ecf5...",
-    "status": "acked",
-    "acked_by": "admin",
-    "acked_at": "2026-06-24T10:35:00Z"
-  }
+  "name": "CPU 高阈值",
+  "metric": "cpu",
+  "threshold": 80,
+  "severity": "major",
+  "enabled": true
 }
 ```
 
-#### 清除告警
+#### 更新告警规则
 
 ```http
-POST /api/v1/alarms/:id/clear
+PUT /api/v1/alarm-rules
 ```
 
-**响应:**
+#### 删除告警规则
+
+```http
+DELETE /api/v1/alarm-rules
+```
+
+---
+
+### 通知
+
+#### 获取通知渠道列表
+
+```http
+GET /api/v1/notifications/channels
+```
+
+#### 创建通知渠道
+
+```http
+POST /api/v1/notifications/channels
+```
+
+**请求体:**
 
 ```json
 {
-  "code": 200,
-  "message": "success",
-  "data": {
-    "id": "60d5ecf5...",
-    "status": "cleared",
-    "cleared_by": "admin",
-    "cleared_at": "2026-06-24T10:40:00Z"
-  }
+  "name": "运维 Webhook",
+  "type": "webhook",
+  "config": {
+    "url": "https://hooks.example.com/notify",
+    "method": "POST"
+  },
+  "enabled": true
 }
+```
+
+#### 更新通知渠道
+
+```http
+PUT /api/v1/notifications/channels
+```
+
+#### 删除通知渠道
+
+```http
+DELETE /api/v1/notifications/channels
+```
+
+#### 获取告警升级规则
+
+```http
+GET /api/v1/notifications/escalation
+```
+
+#### 创建告警升级规则
+
+```http
+POST /api/v1/notifications/escalation
+```
+
+#### 删除告警升级规则
+
+```http
+DELETE /api/v1/notifications/escalation
+```
+
+#### 获取通知日志
+
+```http
+GET /api/v1/notifications/logs
 ```
 
 ---
@@ -390,7 +455,7 @@ GET /api/v1/subscribers?page=1&page_size=20&imsi=460110000000001
         "apn": "internet",
         "qos": 5,
         "status": "active",
-        "created_at": "2026-06-24T10:30:00Z"
+        "created_at": "2026-07-01T10:30:00Z"
       }
     ],
     "total": 1000,
@@ -421,15 +486,6 @@ POST /api/v1/subscribers
 
 ```http
 PUT /api/v1/subscribers/:id
-```
-
-**请求体:**
-
-```json
-{
-  "apn": "5gnet",
-  "qos": 9
-}
 ```
 
 #### 删除订户
@@ -463,7 +519,7 @@ GET /api/v1/sites
       "nrf_url": "http://nrf.5gc.mnc011.mcc460.3gppnetwork.org:8080",
       "nf_ids": ["amfd", "smfd", "upfd"],
       "enabled": true,
-      "created_at": "2026-06-24T10:30:00Z"
+      "created_at": "2026-07-01T10:30:00Z"
     }
   ]
 }
@@ -475,17 +531,16 @@ GET /api/v1/sites
 POST /api/v1/sites
 ```
 
-**请求体:**
+#### 更新站点
 
-```json
-{
-  "name": "上海数据中心",
-  "type": "dc",
-  "parent_id": "60d5ecf5...",
-  "nrf_url": "http://nrf.5gc.mnc011.mcc460.3gppnetwork.org:8080",
-  "nf_ids": ["amfd", "smfd", "upfd"],
-  "enabled": true
-}
+```http
+PUT /api/v1/sites
+```
+
+#### 删除站点
+
+```http
+DELETE /api/v1/sites
 ```
 
 ---
@@ -496,27 +551,6 @@ POST /api/v1/sites
 
 ```http
 GET /api/v1/tasks
-```
-
-**响应:**
-
-```json
-{
-  "code": 200,
-  "message": "success",
-  "data": [
-    {
-      "id": "60d5ecf5...",
-      "name": "数据清理任务",
-      "cron": "0 2 * * *",
-      "command": "clean_old_data",
-      "enabled": true,
-      "last_run": "2026-06-24T02:00:00Z",
-      "next_run": "2026-06-25T02:00:00Z",
-      "created_at": "2026-06-24T10:30:00Z"
-    }
-  ]
-}
 ```
 
 #### 创建任务
@@ -536,6 +570,18 @@ POST /api/v1/tasks
 }
 ```
 
+#### 更新任务
+
+```http
+PUT /api/v1/tasks
+```
+
+#### 删除任务
+
+```http
+DELETE /api/v1/tasks
+```
+
 ---
 
 ### 用户
@@ -544,23 +590,6 @@ POST /api/v1/tasks
 
 ```http
 GET /api/v1/users
-```
-
-**响应:**
-
-```json
-{
-  "code": 200,
-  "message": "success",
-  "data": [
-    {
-      "id": "60d5ecf5...",
-      "username": "admin",
-      "role": "admin",
-      "created_at": "2026-06-24T10:30:00Z"
-    }
-  ]
-}
 ```
 
 #### 创建用户
@@ -577,6 +606,18 @@ POST /api/v1/users
   "password": "password123",
   "role": "operator"
 }
+```
+
+#### 更新用户
+
+```http
+PUT /api/v1/users
+```
+
+#### 删除用户
+
+```http
+DELETE /api/v1/users
 ```
 
 ---
@@ -598,30 +639,6 @@ GET /api/v1/audit/logs?page=1&page_size=20&user=admin&action=login
 | `start_time` | string | 开始时间 |
 | `end_time` | string | 结束时间 |
 
-**响应:**
-
-```json
-{
-  "code": 200,
-  "message": "success",
-  "data": {
-    "items": [
-      {
-        "id": "60d5ecf5...",
-        "user": "admin",
-        "action": "login",
-        "detail": "用户登录成功",
-        "ip": "192.168.1.100",
-        "created_at": "2026-06-24T10:30:00Z"
-      }
-    ],
-    "total": 500,
-    "page": 1,
-    "page_size": 20
-  }
-}
-```
-
 #### 获取 NF 日志
 
 ```http
@@ -636,6 +653,78 @@ GET /api/v1/nf/logs?source=amfd&level=error&limit=100
 | `level` | string | 日志级别: `info`, `warn`, `error`, `debug` |
 | `limit` | int | 返回数量 |
 
+#### 获取日志文件列表
+
+```http
+GET /api/v1/nf/logs/files
+```
+
+返回可用的日志文件列表。
+
+#### 日志流 WebSocket
+
+```http
+GET /api/v1/nf/logs/ws
+Upgrade: websocket
+```
+
+实时日志流，支持运行时动态过滤（客户端发送 JSON）：
+
+```json
+{
+  "level": "ERROR",
+  "keyword": "timeout"
+}
+```
+
+---
+
+### 指标
+
+#### 获取指标历史
+
+```http
+GET /api/v1/metrics/history?source=amfd&name=cpu&start_time=2026-07-01T00:00:00Z
+```
+
+#### 获取接口健康状态
+
+```http
+GET /api/v1/interface-health
+```
+
+返回各 NF 接口探测结果（30s 周期探测）。
+
+#### 获取电信 KPI
+
+```http
+GET /api/v1/telecom-kpi
+```
+
+返回电信域 KPI 指标（60s 周期采集）。
+
+#### 获取业务指标
+
+```http
+GET /api/v1/business-metrics
+```
+
+返回业务指标数据，集成来源：
+- MySQL `hss_db`: IMS 订户数
+- MySQL `scscf`: S-CSCF 注册数
+- open5gs SMF Prometheus: 5G 会话数
+
+#### 获取 UE 信息
+
+```http
+GET /api/v1/ue-info
+```
+
+返回当前在线 UE 信息，集成来源：
+- open5gs MME (127.0.0.2:9090): EPC UE
+- open5gs AMF (127.0.0.5:9090): 5G UE
+- open5gs SMF (127.0.0.4:9090): 5G 会话
+
 ---
 
 ### 备份
@@ -644,23 +733,6 @@ GET /api/v1/nf/logs?source=amfd&level=error&limit=100
 
 ```http
 GET /api/v1/backups
-```
-
-**响应:**
-
-```json
-{
-  "code": 200,
-  "message": "success",
-  "data": [
-    {
-      "id": "60d5ecf5...",
-      "name": "config_backup_20260624",
-      "version": 1,
-      "created_at": "2026-06-24T10:30:00Z"
-    }
-  ]
-}
 ```
 
 #### 创建备份
@@ -673,15 +745,31 @@ POST /api/v1/backups
 
 ```json
 {
-  "name": "config_backup_20260624",
+  "name": "config_backup_20260701",
   "content": "{ ... }"
 }
 ```
 
-#### 恢复备份
+> **去重机制**: 使用 SHA-256 校验和，相同内容的备份会被跳过。
+
+#### 删除备份
 
 ```http
-POST /api/v1/backups/:id/restore
+DELETE /api/v1/backups
+```
+
+#### 获取备份 diff
+
+```http
+GET /api/v1/backups/diff
+```
+
+比较两个版本之间的差异。
+
+#### 获取备份版本历史
+
+```http
+GET /api/v1/backups/versions
 ```
 
 ---
@@ -691,55 +779,76 @@ POST /api/v1/backups/:id/restore
 #### 获取知识库文章列表
 
 ```http
-GET /api/v1/kb?page=1&page_size=20&category=故障处理&tag=AMF
+GET /api/v1/solutions?page=1&page_size=20&category=故障处理&tag=AMF
 ```
 
-**查询参数:**
+#### 搜索知识库
 
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `category` | string | 文章分类 |
-| `tag` | string | 标签 |
-| `keyword` | string | 关键词 |
-
-**响应:**
-
-```json
-{
-  "code": 200,
-  "message": "success",
-  "data": {
-    "items": [
-      {
-        "id": "60d5ecf5...",
-        "title": "AMF 进程故障排查指南",
-        "category": "故障处理",
-        "tags": ["AMF", "进程", "重启"],
-        "views": 156,
-        "created_at": "2026-06-24T10:30:00Z"
-      }
-    ],
-    "total": 50,
-    "page": 1,
-    "page_size": 20
-  }
-}
+```http
+GET /api/v1/solutions/search?keyword=AMF+进程
 ```
+
+全文搜索知识库内容。
+
+#### 获取知识库统计
+
+```http
+GET /api/v1/solutions/stats
+```
+
+返回文章数量、分类分布、热门标签等统计。
 
 #### 获取知识库文章详情
 
 ```http
-GET /api/v1/kb/:id
+GET /api/v1/solutions/:id
+```
+
+#### 创建知识库文章
+
+```http
+POST /api/v1/solutions
+```
+
+#### 更新知识库文章
+
+```http
+PUT /api/v1/solutions
+```
+
+#### 删除知识库文章
+
+```http
+DELETE /api/v1/solutions
+```
+
+#### 上传文件
+
+```http
+POST /api/v1/solutions/upload
+Content-Type: multipart/form-data
+```
+
+#### 下载文件
+
+```http
+GET /api/v1/solutions/files/:name
 ```
 
 ---
 
 ### AIOps
 
+#### 获取异常检测结果
+
+```http
+GET /api/v1/aiops/anomalies?source=amfd&start_time=2026-07-01T00:00:00Z&end_time=2026-07-01T23:59:59Z
+```
+
 #### 获取根因分析结果
 
 ```http
-GET /api/v1/aiops/rca/:alarm_id
+GET /api/v1/aiops/root-causes
 ```
 
 **响应:**
@@ -748,26 +857,32 @@ GET /api/v1/aiops/rca/:alarm_id
 {
   "code": 200,
   "message": "success",
-  "data": {
-    "id": "60d5ecf5...",
-    "alarm_id": "60d5ecf5...",
-    "candidates": [
-      {
-        "description": "RTPENGINE offer/answer 参数异常",
-        "confidence": 0.86,
-        "evidence": [
-          "RTPENGINE 日志显示 offer 处理时 SDP c= 行 IP 地址错误",
-          "抓包显示 RTP 包发送到 10.0.0.1 而非实际 UE IP"
-        ]
-      }
-    ],
-    "recommendations": [
-      "检查 rtpengine_sock 配置",
-      "检查 route[NATMANAGE] 路由逻辑"
-    ],
-    "created_at": "2026-06-24T10:30:00Z"
-  }
+  "data": [
+    {
+      "id": "60d5ecf5...",
+      "alarm_id": "60d5ecf5...",
+      "candidates": [
+        {
+          "description": "RTPENGINE offer/answer 参数异常",
+          "confidence": 0.86,
+          "evidence": [
+            "RTPENGINE 日志显示 offer 处理时 SDP c= 行 IP 地址错误"
+          ]
+        }
+      ],
+      "recommendations": ["检查 rtpengine_sock 配置"],
+      "created_at": "2026-07-01T10:30:00Z"
+    }
+  ]
 }
+```
+
+> **自动触发**: RCA 在新告警插入时自动执行，无需手动请求。
+
+#### 获取容量预测
+
+```http
+GET /api/v1/aiops/predictions
 ```
 
 #### 获取趋势分析
@@ -776,10 +891,89 @@ GET /api/v1/aiops/rca/:alarm_id
 GET /api/v1/aiops/trends?source=amfd&metric=cpu&period=24h
 ```
 
-#### 获取异常检测结果
+#### 获取 AIOps 汇总
 
 ```http
-GET /api/v1/aiops/anomalies?source=amfd&start_time=2026-06-24T00:00:00Z&end_time=2026-06-24T23:59:59Z
+GET /api/v1/aiops/summary
+```
+
+返回 AIOps 整体摘要（异常数、趋势、预测概览）。
+
+---
+
+### 报表
+
+#### 导出指标 CSV
+
+```http
+GET /api/v1/reports/metrics/csv?source=amfd&start_time=2026-07-01T00:00:00Z
+```
+
+#### 导出告警 CSV
+
+```http
+GET /api/v1/reports/alarms/csv?severity=major&start_time=2026-07-01T00:00:00Z
+```
+
+#### 获取报表汇总
+
+```http
+GET /api/v1/reports/summary
+```
+
+---
+
+### 部署
+
+#### 获取部署模板列表
+
+```http
+GET /api/v1/deployment/templates
+```
+
+#### 设置部署模板
+
+```http
+POST /api/v1/deployment/template
+```
+
+#### 获取部署状态
+
+```http
+GET /api/v1/deployment/status
+```
+
+#### 获取组件状态
+
+```http
+GET /api/v1/deployment/component
+```
+
+#### 部署状态 WebSocket
+
+```http
+GET /api/v1/deployment/ws
+Upgrade: websocket
+```
+
+推送部署状态（5s 间隔）和 EPC/IMS 业务指标（10s 间隔）。
+
+---
+
+### NF 发现
+
+#### 触发 NF 发现
+
+```http
+GET /api/v1/nf/discovery
+```
+
+手动触发 NF 自动发现（NRF 查询）。
+
+#### 获取已发现 NF
+
+```http
+GET /api/v1/nf/discovered
 ```
 
 ---
@@ -813,32 +1007,57 @@ POST /api/v1/mml/execute
 }
 ```
 
+**支持的 MML 命令:**
+
+| 命令 | 说明 | 权限 |
+|------|------|------|
+| `ADD-SUB` | 添加订户 | operator+ |
+| `DEL-SUB` | 删除订户 | operator+ |
+| `LST-SUB` | 查询订户 | any |
+| `MOD-SUB` | 修改订户 | operator+ |
+| `CTRL-NF` | NF 服务控制 | operator+ |
+| `ACK-ALARM` | 确认告警 | operator+ |
+| `CLR-ALARM` | 清除告警 | operator+ |
+| `ADD-SUB-BATCH` | 批量添加订户 | operator+ |
+| `EXP-SUB` | 导出订户 | any |
+| `IMP-SUB` | 导入订户 | operator+ |
+
 ---
 
 ## WebSocket API
 
-### 连接
+### 三个 WebSocket 端点
+
+| 端点 | 用途 | 推送间隔 |
+|------|------|----------|
+| `/api/v1/monitor/ws` | NF 进程状态、告警生成、指标持久化 | 2s (状态), 30s (指标) |
+| `/api/v1/nf/logs/ws` | 实时日志流（支持动态 level/keyword 过滤） | 500ms 轮询 |
+| `/api/v1/deployment/ws` | 部署状态 + EPC/IMS 用户数 | 5s (部署), 10s (业务) |
+
+### 连接示例
 
 ```javascript
-const ws = new WebSocket('ws://localhost:8080/api/v1/monitor/ws');
+// 监控 WebSocket
+const monitorWs = new WebSocket('ws://localhost:8080/api/v1/monitor/ws?token=<jwt>');
 
-ws.onopen = () => {
-  console.log('Connected');
-};
-
-ws.onmessage = (event) => {
+monitorWs.onmessage = (event) => {
   const data = JSON.parse(event.data);
-  console.log('Received:', data);
+  // data.type: "metrics" | "alarm" | "process"
 };
 
-ws.onclose = () => {
-  console.log('Disconnected');
-};
+// 日志流 WebSocket
+const logWs = new WebSocket('ws://localhost:8080/api/v1/nf/logs/ws?token=<jwt>');
+
+// 运行时动态修改过滤条件
+logWs.send(JSON.stringify({ level: 'ERROR', keyword: 'timeout' }));
+
+// 部署状态 WebSocket
+const deployWs = new WebSocket('ws://localhost:8080/api/v1/deployment/ws?token=<jwt>');
 ```
 
-### 消息类型
+### 消息格式
 
-#### 指标数据
+#### 监控指标
 
 ```json
 {
@@ -851,7 +1070,7 @@ ws.onclose = () => {
     "status": "running",
     "uptime": "24h30m"
   },
-  "timestamp": "2026-06-24T10:30:00Z"
+  "timestamp": "2026-07-01T10:30:00Z"
 }
 ```
 
@@ -867,7 +1086,7 @@ ws.onclose = () => {
     "message": "CPU usage high",
     "status": "active"
   },
-  "timestamp": "2026-06-24T10:30:00Z"
+  "timestamp": "2026-07-01T10:30:00Z"
 }
 ```
 
@@ -881,9 +1100,26 @@ ws.onclose = () => {
     "status": "stopped",
     "pid": null
   },
-  "timestamp": "2026-06-24T10:30:00Z"
+  "timestamp": "2026-07-01T10:30:00Z"
 }
 ```
+
+---
+
+## RBAC 权限
+
+三种角色：`admin`、`operator`、`viewer`
+
+| 角色 | 权限范围 |
+|------|----------|
+| **admin** | 全部权限，包括用户管理 |
+| **operator** | MML 执行、订户管理、任务管理、通知配置、备份、站点、知识库 |
+| **viewer** | 所有数据的只读访问 |
+
+API 文档中各端点的 RBAC 标注：
+- `any`: 所有角色可访问
+- `operator+`: operator 和 admin 可访问
+- `admin`: 仅 admin 可访问
 
 ---
 
@@ -944,4 +1180,5 @@ curl -s http://localhost:8080/api/v1/alarms \
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| v1.4.1 | 2026-07-01 | 全面更新：补充告警规则、通知、指标、UE 信息、报表、部署、NF 发现等 API |
 | v1.4.1 | 2026-06-01 | 初始版本 |

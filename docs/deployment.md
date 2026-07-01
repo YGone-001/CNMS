@@ -1,6 +1,6 @@
 # 部署指南
 
-xCloud-CNMS 部署和配置指南。
+xCloud-CNMS 部署和配置指南（v1.4.1）。
 
 ---
 
@@ -11,8 +11,10 @@ xCloud-CNMS 部署和配置指南。
 - [Docker 部署](#docker-部署)
 - [手动部署](#手动部署)
 - [配置说明](#配置说明)
+- [外部依赖集成](#外部依赖集成)
 - [生产环境部署](#生产环境部署)
 - [常见问题](#常见问题)
+- [升级指南](#升级指南)
 
 ---
 
@@ -22,7 +24,7 @@ xCloud-CNMS 部署和配置指南。
 
 | 组件 | 最低要求 | 推荐配置 |
 |------|----------|----------|
-| **操作系统** | Ubuntu 20.04 / CentOS 7 | Ubuntu 24.04 |
+| **操作系统** | Ubuntu 20.04 | Ubuntu 24.04 |
 | **CPU** | 2 核 | 4 核 |
 | **内存** | 4 GB | 8 GB |
 | **磁盘** | 20 GB | 50 GB |
@@ -34,7 +36,8 @@ xCloud-CNMS 部署和配置指南。
 |------|------|------|
 | **Go** | 1.24+ | 后端编译 |
 | **Node.js** | 18+ | 前端编译 |
-| **MongoDB** | 7.0+ | 数据存储 |
+| **MongoDB** | 7.0+ | xCloud 数据存储 |
+| **MySQL** | 8.0+ | IMS 侧数据（hss_db, scscf）— 仅 IMS 集成时需要 |
 | **Git** | 2.30+ | 代码管理 |
 | **Docker** | 24.0+ | 容器部署（可选） |
 | **Docker Compose** | 2.20+ | 容器编排（可选） |
@@ -45,7 +48,17 @@ xCloud-CNMS 部署和配置指南。
 |------|------|------|
 | 8080 | HTTP | Web UI 和 API |
 | 27017 | TCP | MongoDB |
+| 3306 | TCP | MySQL（IMS 侧，可选） |
 | 8088 | HTTP | Agent 上报（可选） |
+
+### 核心网组件（联调环境）
+
+| 组件 | 路径 | 说明 |
+|------|------|------|
+| open5gs | /usr/local/src/open5gs | EPC + 5G 核心网 |
+| Kamailio | /usr/local/src/kamailio | SIP 代理（IMS P/S/I-CSCF） |
+| FreeSWITCH | /usr/local/freeswitch | VoIP 媒体服务器 |
+| heplify | /usr/local/src/claudeWorkSpace/heplify | HEP 抓包采集器 |
 
 ---
 
@@ -55,12 +68,12 @@ xCloud-CNMS 部署和配置指南。
 
 ```bash
 # 克隆代码
-git clone https://github.com/YGone-001/CNMS.git
-cd CNMS
+git clone <repo-url>
+cd xCloud-CNMS
 
-# 执行部署脚本
-chmod +x deploy.sh
-./deploy.sh
+# 执行构建脚本
+chmod +x build.sh
+./build.sh
 ```
 
 ### 手动快速部署
@@ -68,7 +81,7 @@ chmod +x deploy.sh
 ```bash
 # 1. 安装依赖
 sudo apt update
-sudo apt install -y golang nodejs npm mongodb
+sudo apt install -y golang nodejs npm mongodb-org
 
 # 2. 构建项目
 ./build.sh
@@ -86,13 +99,8 @@ cd backend && ./xcloud-cnms -config config/config.json
 #### 1. 准备配置文件
 
 ```bash
-# 创建配置目录
 mkdir -p config
-
-# 复制配置文件
 cp config.json config/config.json
-
-# 修改配置（可选）
 vi config/config.json
 ```
 
@@ -127,7 +135,6 @@ docker-compose down
 version: '3.8'
 
 services:
-  # MongoDB 数据库
   mongodb:
     image: mongo:7
     container_name: xcloud-mongodb
@@ -146,7 +153,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # xCloud-CNMS 应用
   xcloud-cnms:
     build:
       context: .
@@ -236,45 +242,11 @@ sudo systemctl start mongod
 sudo systemctl enable mongod
 ```
 
-#### CentOS/RHEL
-
-```bash
-# 安装 Go
-wget https://go.dev/dl/go1.24.4.linux-amd64.tar.gz
-sudo tar -C /usr/local -xzf go1.24.4.linux-amd64.tar.gz
-echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
-source ~/.bashrc
-
-# 安装 Node.js
-curl -fsSL https://rpm.nodesource.com/setup_18.x | sudo bash -
-sudo yum install -y nodejs
-
-# 安装 MongoDB
-sudo vi /etc/yum.repos.d/mongodb-org-7.0.repo
-```
-
-添加以下内容：
-
-```ini
-[mongodb-org-7.0]
-name=MongoDB Repository
-baseurl=https://repo.mongodb.org/yum/redhat/$releasever/mongodb-org/7.0/x86_64/
-gpgcheck=1
-enabled=1
-gpgkey=https://www.mongodb.org/static/pgp/server-7.0.asc
-```
-
-```bash
-sudo yum install -y mongodb-org
-sudo systemctl start mongod
-sudo systemctl enable mongod
-```
-
 ### 2. 克隆代码
 
 ```bash
-git clone https://github.com/YGone-001/CNMS.git
-cd CNMS
+git clone <repo-url>
+cd xCloud-CNMS
 ```
 
 ### 3. 构建项目
@@ -284,26 +256,14 @@ cd CNMS
 ./build.sh
 
 # 或手动构建
-# 构建前端
-cd frontend
-npm ci
-npm run build
-cd ..
-
-# 构建后端
-cd backend
-go mod download
-go build -o xcloud-cnms .
-cd ..
+cd frontend && npm ci && npm run build && cd ..
+cd backend && go mod download && go build -o xcloud-cnms . && cd ..
 ```
 
 ### 4. 配置服务
 
 ```bash
-# 复制配置文件
 cp config.json backend/config/config.json
-
-# 修改配置
 vi backend/config/config.json
 ```
 
@@ -316,7 +276,7 @@ cd backend && ./xcloud-cnms -config config/config.json
 # 后台运行
 nohup ./backend/xcloud-cnms -config backend/config/config.json > /var/log/xcloud-cnms.log 2>&1 &
 
-# 使用 systemd
+# 使用 systemd（推荐）
 sudo vi /etc/systemd/system/xcloud-cnms.service
 ```
 
@@ -331,8 +291,8 @@ Requires=mongod.service
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/opt/CNMS/backend
-ExecStart=/opt/CNMS/backend/xcloud-cnms -config config/config.json
+WorkingDirectory=/opt/xCloud-CNMS/backend
+ExecStart=/opt/xCloud-CNMS/backend/xcloud-cnms -config config/config.json
 Restart=always
 RestartSec=5
 StandardOutput=syslog
@@ -344,7 +304,6 @@ WantedBy=multi-user.target
 ```
 
 ```bash
-# 启用并启动服务
 sudo systemctl daemon-reload
 sudo systemctl enable xcloud-cnms
 sudo systemctl start xcloud-cnms
@@ -353,7 +312,7 @@ sudo systemctl status xcloud-cnms
 
 ---
 
-## 配说明
+## 配置说明
 
 ### 配置文件结构
 
@@ -419,6 +378,10 @@ sudo systemctl status xcloud-cnms
 | `auth.password` | string | `admin123` | 管理员密码 |
 | `auth.jwt_key` | string | - | JWT 签名密钥 |
 
+### 配置热重载
+
+配置文件支持 fsnotify 热重载，修改后无需重启服务即可生效。
+
 ### 环境变量
 
 支持通过环境变量覆盖配置：
@@ -428,6 +391,50 @@ export XCloud_MONGODB_URI="mongodb://localhost:27017"
 export XCloud_AUTH_ENABLED="true"
 export XCloud_AUTH_JWT_KEY="your-secret-key"
 ```
+
+---
+
+## 外部依赖集成
+
+### open5gs 集成
+
+xCloud-CNMS 通过 HTTP API 与 open5gs 核心网交互：
+
+| 组件 | 地址 | 用途 |
+|------|------|------|
+| MME | 127.0.0.2:9090 | EPC UE 信息查询 |
+| AMF | 127.0.0.5:9090 | 5G UE 信息查询 |
+| SMF | 127.0.0.4:9090 | 5G 会话信息 + Prometheus 指标 |
+
+确保 open5gs 相关 NF 的 HTTP API 端口可访问。
+
+### MySQL 集成（IMS 侧）
+
+xCloud-CNMS 连接 MySQL 获取 IMS 业务指标：
+
+| 数据库 | 用途 |
+|--------|------|
+| `hss_db` | IMS 订户数据（IMPI/IMPU 表） |
+| `scscf` | S-CSCF 注册/联系数据 |
+
+MySQL 连接信息在代码中配置（`handler/business_metrics.go`），确保 MySQL 服务可访问。
+
+### Kamailio IMS 配置
+
+| CSCF | 配置目录 | 日志目录 |
+|------|----------|----------|
+| P-CSCF | /etc/kamailio_pcscf/ | /var/log/cscf/ |
+| S-CSCF | /etc/kamailio_scscf/ | /var/log/cscf/ |
+| I-CSCF | /etc/kamailio_icscf/ | /var/log/cscf/ |
+
+### FreeSWITCH
+
+- 安装路径: /usr/local/freeswitch
+- 配置目录: /usr/local/freeswitch/conf/
+
+### NF 进程管理
+
+xCloud-CNMS 通过 `systemctl` 命令控制 NF 服务启停（MML `CTRL-NF` 命令），确保运行用户有 systemctl 权限。
 
 ---
 
@@ -448,9 +455,7 @@ export XCloud_AUTH_JWT_KEY="your-secret-key"
 }
 ```
 
-#### 2. 启用 HTTPS
-
-使用 Nginx 反向代理：
+#### 2. 启用 HTTPS（Nginx 反向代理）
 
 ```nginx
 server {
@@ -460,6 +465,7 @@ server {
     ssl_certificate /etc/ssl/certs/cnms.crt;
     ssl_certificate_key /etc/ssl/private/cnms.key;
 
+    # HTTP API
     location / {
         proxy_pass http://localhost:8080;
         proxy_set_header Host $host;
@@ -468,14 +474,36 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
+    # 监控 WebSocket
     location /api/v1/monitor/ws {
         proxy_pass http://localhost:8080;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
+        proxy_read_timeout 86400;
+    }
+
+    # 日志流 WebSocket
+    location /api/v1/nf/logs/ws {
+        proxy_pass http://localhost:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 86400;
+    }
+
+    # 部署状态 WebSocket
+    location /api/v1/deployment/ws {
+        proxy_pass http://localhost:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 86400;
     }
 }
 ```
+
+> **注意**: 三个 WebSocket 端点都需要单独配置 `proxy_http_version 1.1` 和 `Connection "upgrade"`。
 
 #### 3. 防火墙配置
 
@@ -496,14 +524,9 @@ sudo firewall-cmd --reload
 #### MongoDB 备份
 
 ```bash
-# 创建备份目录
 mkdir -p /backup/mongodb
-
-# 备份数据库
 mongodump --db xCloud --out /backup/mongodb/$(date +%Y%m%d)
-
-# 恢复数据库
-mongorestore --db xCloud /backup/mongodb/20260624/xCloud
+mongorestore --db xCloud /backup/mongodb/20260701/xCloud
 ```
 
 #### 自动备份脚本
@@ -516,56 +539,30 @@ BACKUP_DIR="/backup/mongodb"
 DATE=$(date +%Y%m%d)
 RETENTION_DAYS=30
 
-# 创建备份
 mongodump --db xCloud --out $BACKUP_DIR/$DATE
-
-# 压缩备份
 tar -czf $BACKUP_DIR/xcloud_$DATE.tar.gz -C $BACKUP_DIR $DATE
 rm -rf $BACKUP_DIR/$DATE
-
-# 删除旧备份
 find $BACKUP_DIR -name "xcloud_*.tar.gz" -mtime +$RETENTION_DAYS -delete
 ```
 
 ```bash
-# 添加定时任务
 crontab -e
 0 2 * * * /opt/scripts/backup_mongodb.sh
 ```
 
-### 监控告警
-
-#### 系统监控
-
-```bash
-# 安装监控工具
-sudo apt install -y prometheus node-exporter
-
-# 配置 Prometheus
-vi /etc/prometheus/prometheus.yml
-```
-
-#### 应用监控
-
-访问 `/api/health` 检查应用状态：
-
-```bash
-curl http://localhost:8080/api/health
-```
-
 ### 性能优化
 
-#### 1. MongoDB 优化
+#### MongoDB 索引
 
 ```javascript
-// 创建索引
 db.alarms.createIndex({ "created_at": -1 })
 db.alarms.createIndex({ "status": 1, "severity": 1 })
 db.metrics.createIndex({ "source": 1, "timestamp": -1 })
 db.audit_logs.createIndex({ "created_at": -1 })
+db.subscribers.createIndex({ "imsi": 1 }, { unique: true })
 ```
 
-#### 2. 系统优化
+#### 系统优化
 
 ```bash
 # 增加文件描述符限制
@@ -578,112 +575,82 @@ echo "net.ipv4.tcp_max_syn_backlog = 65535" >> /etc/sysctl.conf
 sysctl -p
 ```
 
+### 监控
+
+```bash
+# 健康检查
+curl http://localhost:8080/healthz      # 轻量级
+curl http://localhost:8080/readyz        # 含 MongoDB 检查
+curl http://localhost:8080/api/health    # 完整状态
+```
+
 ---
 
 ## 常见问题
 
 ### 1. MongoDB 连接失败
 
-**问题**: `Failed to connect to MongoDB`
-
-**解决**:
-
 ```bash
-# 检查 MongoDB 状态
 sudo systemctl status mongod
-
-# 启动 MongoDB
 sudo systemctl start mongod
-
-# 检查端口
 netstat -tlnp | grep 27017
 ```
 
 ### 2. 端口被占用
 
-**问题**: `Port 8080 already in use`
-
-**解决**:
-
 ```bash
-# 查找占用端口的进程
 lsof -i :8080
-
-# 杀死进程
 kill -9 <PID>
-
-# 或修改配置使用其他端口
-vi config.json
+# 或修改 config.json 中的 server.port
 ```
 
 ### 3. 前端构建失败
 
-**问题**: `npm run build failed`
-
-**解决**:
-
 ```bash
-# 清除缓存
+cd frontend
 rm -rf node_modules package-lock.json
 npm cache clean --force
-
-# 重新安装依赖
 npm install
-
-# 重新构建
 npm run build
 ```
 
 ### 4. Go 编译失败
 
-**问题**: `go build failed`
-
-**解决**:
-
 ```bash
-# 设置 Go 代理
 export GOPROXY=https://goproxy.cn,direct
-
-# 清除模块缓存
 go clean -modcache
-
-# 重新下载依赖
 go mod download
-
-# 重新编译
 go build -o xcloud-cnms .
 ```
 
 ### 5. WebSocket 连接失败
 
-**问题**: WebSocket 连接被拒绝
-
-**解决**:
-
-```bash
-# 检查 Nginx 配置
-# 确保包含 WebSocket 升级配置
-location /api/v1/monitor/ws {
-    proxy_pass http://localhost:8080;
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-}
-```
+Nginx 反向代理需配置 WebSocket 升级（见上方 Nginx 配置）。三个 WS 端点都需要单独配置。
 
 ### 6. 权限问题
 
-**问题**: `Permission denied`
-
-**解决**:
-
 ```bash
-# 修改文件权限
 chmod +x build.sh
 chmod +x backend/xcloud-cnms
-
-# 修改目录权限
 chmod -R 755 /var/log/xCloud
+```
+
+### 7. open5gs API 不可达
+
+```bash
+# 检查 open5gs NF HTTP 端口
+curl http://127.0.0.2:9090   # MME
+curl http://127.0.0.5:9090   # AMF
+curl http://127.0.0.4:9090   # SMF
+```
+
+### 8. MySQL 连接失败（IMS 集成）
+
+```bash
+# 检查 MySQL 状态
+sudo systemctl status mysql
+# 检查 hss_db 和 scscf 数据库
+mysql -u root -p -e "SHOW DATABASES;"
 ```
 
 ---
@@ -693,10 +660,7 @@ chmod -R 755 /var/log/xCloud
 ### 1. 备份数据
 
 ```bash
-# 备份 MongoDB
 mongodump --db xCloud --out /backup/$(date +%Y%m%d)
-
-# 备份配置文件
 cp config.json config.json.bak
 ```
 
@@ -719,17 +683,13 @@ git pull origin main
 sudo systemctl restart xcloud-cnms
 
 # Docker
-docker-compose down
-docker-compose up -d
+docker-compose down && docker-compose up -d
 ```
 
 ### 5. 验证升级
 
 ```bash
-# 检查版本
 curl http://localhost:8080/api/health
-
-# 检查日志
 tail -f /var/log/xcloud-cnms.log
 ```
 
@@ -737,46 +697,20 @@ tail -f /var/log/xcloud-cnms.log
 
 ## 回滚指南
 
-### 1. 停止服务
-
 ```bash
 sudo systemctl stop xcloud-cnms
-```
-
-### 2. 恢复代码
-
-```bash
 git checkout v1.4.1
-```
-
-### 3. 恢复配置
-
-```bash
 cp config.json.bak config.json
-```
-
-### 4. 重新构建
-
-```bash
 ./build.sh
-```
-
-### 5. 恢复数据（如需要）
-
-```bash
-mongorestore --db xCloud /backup/20260624/xCloud
-```
-
-### 6. 启动服务
-
-```bash
+mongorestore --db xCloud /backup/20260701/xCloud  # 如需要
 sudo systemctl start xcloud-cnms
 ```
 
 ---
 
-## 技术支持
+## 更新历史
 
-- 问题反馈: [GitHub Issues](https://github.com/YGone-001/CNMS/issues)
-- 邮箱: 947067341@qq.com
-- 文档: [docs/](docs/)
+| 版本 | 日期 | 说明 |
+|------|------|------|
+| v1.4.1 | 2026-07-01 | 补充 MySQL/open5gs 集成、3 个 WS 端点 Nginx 配置、NF 进程管理 |
+| v1.4.1 | 2026-06-01 | 初始版本 |

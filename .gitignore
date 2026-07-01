@@ -39,3 +39,6 @@ mongo-data/
 
 # Claude settings (optional, can be ignored)
 # .claude/
+CLAUDE.md
+claude.sh
+.claude/
