@@ -80,6 +80,12 @@
   - 影响范围：通知设置页面（新建或集成到 Sites/Settings）
   - 验证方式：通过界面配置 Webhook/邮件通知渠道并发送测试通知
 
+- [ ] PCAP 文件自动清理
+
+  - 背景：/tmp/xcloud-captures/ 下的 pcap 文件超过 24 小时未下载应自动清理
+  - 影响范围：scheduler 模块，新增定时任务类型
+  - 验证方式：24h 后文件被自动删除，MongoDB 记录同步清理
+
 ---
 
 ## 暂缓 / 风险项
@@ -118,3 +124,5 @@
 - [x] KnowledgeBase 种子数据 + Markdown 工具栏
 - [x] StatusBar 动态页面标题 + i18n
 - [x] 深色模式 Markdown 代码块适配
+- [x] 一键抓包功能（后端 6 API + 前端页面 + 12 种协议预设 + WebSocket 实时进度）
+- [x] auth.enabled=false 时 RequireRole 放行修复（解决 "no claims in context" 报错）

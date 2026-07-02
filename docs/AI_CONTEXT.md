@@ -60,9 +60,16 @@ xCloud-CNMS 是一个专业的 4G/5G/IMS 核心网监控管理平台，面向电
 | router | internal/router/ | 路由注册（flat switch）、SPA 静态资源 |
 | middleware | internal/middleware/ | 限流中间件（20 req/s, burst 40） |
 
-### 前端页面 (React, 25 个)
+### 后端模块补充
 
-#### 主导航（侧边栏 16 项）
+| 模块 | 路径 | 职责 |
+|------|------|------|
+| capture | internal/handler/capture.go | 一键抓包（tcpdump 生命周期管理、BPF 校验、WebSocket 进度推送） |
+| capture model | internal/model/capture.go | 抓包会话数据模型（CaptureSession、ProtocolPreset） |
+
+### 前端页面 (React, 26 个)
+
+#### 主导航（侧边栏 17 项）
 
 | 页面 | 文件 | 功能 |
 |------|------|------|
@@ -74,6 +81,7 @@ xCloud-CNMS 是一个专业的 4G/5G/IMS 核心网监控管理平台，面向电
 | MetricsHistory | MetricsHistory.tsx | 实时指标监控 |
 | AlarmCenter | AlarmCenter.tsx | 告警中心（闭环管理） |
 | FaultDiagnosis | FaultDiagnosis.tsx | 故障诊断（5 种故障类型、发生次数、AI 推荐） |
+| PacketCapture | PacketCapture.tsx | 抓包工具（tcpdump 抓包、12 种协议预设、WebSocket 实时进度、PCAP 下载） |
 | FaultResolution | FaultResolution.tsx | 故障处置（一键修复、验证、状态流转） |
 | LogCenter | LogCenter.tsx | 日志中心（多目录、实时流、日期滚动、告警关联） |
 | ConfigBackups | ConfigBackups.tsx | 配置备份（版本历史、diff 对比） |
@@ -152,6 +160,19 @@ MongoDB (历史指标) → aiops/aggregator.go (每小时聚合)
                  → handler/aiops.go → 前端展示
 ```
 
+### 抓包流
+
+```
+前端 PacketCapture → POST /api/v1/capture/start
+                  → handler/capture.go (BPF 校验 + 并发检查)
+                  → exec.Command("tcpdump") 启动进程
+                  → monitorCapture goroutine (2s 轮询: file_size/packet_count/超时/超大小)
+                  → MongoDB capture_sessions (状态持久化)
+                  → 前端 useCaptureSocket (WebSocket capture_progress 实时更新)
+                  → POST /api/v1/capture/stop → SIGTERM → 进程退出 → completed
+                  → GET /api/v1/capture/download → http.ServeFile 返回 PCAP
+```
+
 ### 外部数据集成
 
 ```
@@ -165,7 +186,7 @@ MySQL scscf                → handler/business_metrics.go → S-CSCF 注册数
 
 ## 数据存储
 
-- **MongoDB (xCloud)**: 20+ 集合（告警、指标、订户、站点、任务、备份、知识库、审计日志、AIOps 子集合、通知、KPI 等）
+- **MongoDB (xCloud)**: 20+ 集合（告警、指标、订户、站点、任务、备份、知识库、审计日志、AIOps 子集合、通知、KPI、capture_sessions 等）
 - **MongoDB (open5gs)**: open5gs 核心网订户数据
 - **MySQL (hss_db)**: IMS 订户数据（IMPI/IMPU 表）
 - **MySQL (scscf)**: S-CSCF 注册/联系数据
@@ -199,6 +220,7 @@ MySQL scscf                → handler/business_metrics.go → S-CSCF 注册数
 - **报表**: 指标 CSV、告警 CSV、汇总报表
 - **部署**: 部署模板、状态、组件状态
 - **发现**: NF 自动发现
+- **抓包**: 启动/停止 tcpdump、会话查询、PCAP 下载、协议预设列表
 
 ---
 
@@ -251,6 +273,7 @@ AIOps 后台任务（通过 Scheduler）：
 - 抓包脚本: pcap/pcap.sh（tcpdump 抓 SIP/RTP/HEP 流量）
 - 抓包文件: pcap/按日期目录/
 - HEP 采集: heplify 项目
+- 一键抓包: xCloud-CNMS 内置功能（/api/v1/capture/*），PCAP 存储于 /tmp/xcloud-captures/
 
 ---
 
@@ -266,6 +289,7 @@ AIOps 后台任务（通过 Scheduler）：
 8. **RCA 自动触发**: 新告警插入时自动执行根因分析
 9. **配置备份 SHA-256**: 校验和去重，跳过未变更配置
 10. **日志流动态过滤**: 客户端可在连接中发送 JSON 修改过滤条件
+11. **auth 未启用时 RequireRole 放行**: auth.enabled=false 时 JWT 中间件不运行，context 无 claims；RequireRole 遇到无 claims 时直接放行，handler 内部检查同样跳过角色校验
 
 ---
 
@@ -293,6 +317,7 @@ AIOps 后台任务（通过 Scheduler）：
 - API 文档（OpenAPI 3.0 + 交互式 Try it）
 - 前端深色/浅色主题、i18n 国际化
 - 审计日志、用户管理
+- 一键抓包（tcpdump 管理、12 种协议预设、BPF 注入防护、WebSocket 实时进度、PCAP 下载、RBAC 权限控制）
 
 ### 规划中
 

@@ -51,6 +51,7 @@ import AgentManagement from './pages/AgentManagement';
 import FaultResolution from './pages/FaultResolution';
 import LogCenter from './pages/LogCenter';
 import FaultDiagnosis from './pages/FaultDiagnosis';
+import PacketCapture from './pages/PacketCapture';
 
 // Auth helpers
 function getAuthToken(): string | null {
@@ -125,6 +126,7 @@ function useNavItems(): NavItem[] {
     { path: '/metrics', label: t('nav.metricsHistory'), icon: Activity },
     { path: '/alarms', label: t('nav.alarms'), icon: Bell, badge: alarmCount || undefined },
     { path: '/fault-diagnosis', label: t('nav.faultDiagnosis'), icon: Zap },
+    { path: '/capture', label: t('nav.packetCapture'), icon: Radio },
     { path: '/fault-resolution', label: t('nav.faultResolution'), icon: Lightbulb },
     { path: '/logs', label: t('nav.logCenter'), icon: FileText },
     { path: '/backups', label: t('nav.configBackups'), icon: Database },
@@ -397,6 +399,7 @@ export default function App() {
           <Route path="/metrics" element={<MetricsHistory />} />
           <Route path="/alarms" element={<AlarmCenter />} />
           <Route path="/fault-diagnosis" element={<FaultDiagnosis />} />
+          <Route path="/capture" element={<PacketCapture />} />
           <Route path="/fault-resolution" element={<FaultResolution />} />
           <Route path="/logs" element={<LogCenter />} />
           <Route path="/backups" element={<ConfigBackups />} />

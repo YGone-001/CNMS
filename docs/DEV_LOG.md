@@ -112,7 +112,7 @@
 
 ## 阶段五：文档体系与代码整理 (2026-07)
 
-**状态**: 🔄 进行中
+**状态**: ✅ 已完成
 
 ### 已完成内容
 
@@ -124,6 +124,57 @@
 ### 关键 commit
 
 - `a5419a1` docs: 完善项目文档体系
+
+---
+
+## 阶段六：一键抓包功能 (2026-07-02)
+
+**状态**: ✅ 已完成
+
+### 已完成内容
+
+**后端（Go）**：
+- `model/capture.go` — CaptureSession 数据模型 + ProtocolPreset 类型
+- `handler/capture.go` — 6 个 API handler（start/stop/sessions/download/delete/presets）
+  - tcpdump 进程管理（exec.Command + Setpgid 进程组 + SIGTERM/SIGKILL）
+  - BPF 注入防护（正则校验 + shell 特殊字符黑名单）
+  - 后台监控 goroutine（2s 轮询 file_size/packet_count，超时/超大小自动停止）
+  - 并发限制（MongoDB 查询 running 状态，同时只允许 1 个会话）
+  - 资源上限（max_duration ≤ 3600s，max_size ≤ 500MB）
+- `router/router.go` — 新增 6 条路由（requireOperator 保护 start/stop/delete）
+- `handler/swagger.go` — OpenAPI 文档新增 Capture 分组（6 个端点 + CaptureSession schema）
+- `auth/jwt.go` — 修复 RequireRole 在 auth.enabled=false 时的行为（无 claims 放行）
+
+**前端（React/TypeScript）**：
+- `pages/PacketCapture.tsx` — 完整抓包页面（904 行）
+  - 标题栏 + 统计卡片 + 实时状态条（WebSocket capture_progress）+ 历史表格 + 配置弹窗
+  - 12 种协议预设模板（VoLTE/SIP/Diameter/GTP/S1AP/RTP/DNS/PFCP 等）
+  - useCaptureSocket hook 监听 /api/v1/monitor/ws 的 capture_progress 消息
+  - i18n 全覆盖（capture.* 62 条中英文词条）
+- `locales/zh.ts` / `locales/en.ts` — 新增 nav.packetCapture + capture.* 词条
+- `App.tsx` — 路由 /capture + 侧边栏菜单项（fault-diagnosis 和 fault-resolution 之间）
+- `components/StatusBar.tsx` — 页面标题映射 /capture → nav.packetCapture
+
+**Bug 修复**：
+- auth.enabled=false 时 requireOperator 返回 "no claims in context" 的问题
+  - 根因：JWT 中间件未运行 → context 无 claims → RequireRole 拒绝
+  - 修复：RequireRole 无 claims 时放行 + handler 内部 claims 为 nil 时跳过角色检查
+
+### 新增文件
+
+- `backend/internal/model/capture.go` (34 行)
+- `backend/internal/handler/capture.go` (713 行)
+- `frontend/src/pages/PacketCapture.tsx` (904 行)
+
+### 修改文件
+
+- `backend/internal/router/router.go` — 追加 6 条路由
+- `backend/internal/handler/swagger.go` — 追加 OpenAPI 定义
+- `backend/internal/auth/jwt.go` — RequireRole 修复
+- `frontend/src/App.tsx` — 路由 + 侧边栏
+- `frontend/src/components/StatusBar.tsx` — 页面标题映射
+- `frontend/src/locales/zh.ts` — 中文 i18n
+- `frontend/src/locales/en.ts` — 英文 i18n
 
 ---
 
@@ -165,8 +216,9 @@ P-CSCF 已有多个备份版本：
 
 | 项目 | 状态 | 说明 |
 |------|------|------|
-| xCloud-CNMS 后端 | ✅ 稳定 | 17 个 handler，3 个 WS 端点，AIOps 已接入 |
-| xCloud-CNMS 前端 | ✅ 稳定 | 25 个页面，深色模式，i18n |
-| 文档体系 | ✅ 已建立 | 5 个文档全面更新 |
+| xCloud-CNMS 后端 | ✅ 稳定 | 18 个 handler（含 capture），3 个 WS 端点，AIOps 已接入 |
+| xCloud-CNMS 前端 | ✅ 稳定 | 26 个页面（含 PacketCapture），深色模式，i18n |
+| 文档体系 | ✅ 已建立 | 5 个文档全面更新，含抓包工具 |
 | IMS 配置 | 🔄 调优中 | P/S/I-CSCF 已配置，持续优化 |
 | heplify | ✅ 已集成 | HEP 采集可用，未与主系统联动 |
+| 一键抓包 | ✅ 已完成 | tcpdump 管理、12 种协议预设、WebSocket 实时进度、PCAP 下载 |

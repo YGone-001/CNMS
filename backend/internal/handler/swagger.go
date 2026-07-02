@@ -302,6 +302,156 @@ func (h *Handler) SwaggerSpec(w http.ResponseWriter, r *http.Request) {
           }
         }
       }
+    },
+    "/v1/capture/start": {
+      "post": {
+        "tags": ["Capture"],
+        "summary": "Start packet capture",
+        "operationId": "startCapture",
+        "description": "Start a tcpdump packet capture session. Only one session can run at a time.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string", "description": "User-defined capture name" },
+                  "interface": { "type": "string", "default": "any", "description": "Network interface" },
+                  "protocol": { "type": "string", "description": "Protocol preset key (volte_full, sip, diameter, gtp, etc.)" },
+                  "filter": { "type": "string", "description": "Custom BPF filter expression (overrides protocol preset)" },
+                  "max_duration": { "type": "integer", "default": 300, "maximum": 3600, "description": "Max capture duration in seconds" },
+                  "max_size": { "type": "integer", "default": 100, "maximum": 500, "description": "Max file size in MB" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Capture started", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CaptureSession" } } } },
+          "409": { "description": "Another capture is already running" }
+        }
+      }
+    },
+    "/v1/capture/stop": {
+      "post": {
+        "tags": ["Capture"],
+        "summary": "Stop packet capture",
+        "operationId": "stopCapture",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                  "id": { "type": "string", "description": "Capture session ID" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Capture stopped", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CaptureSession" } } } },
+          "400": { "description": "Session is not running" }
+        }
+      }
+    },
+    "/v1/capture/sessions": {
+      "get": {
+        "tags": ["Capture"],
+        "summary": "List capture sessions",
+        "operationId": "getCaptureSessions",
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "page_size", "in": "query", "schema": { "type": "integer", "default": 20 } },
+          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["running", "completed", "error"] } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Session list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" },
+                    "sessions": { "type": "array", "items": { "$ref": "#/components/schemas/CaptureSession" } },
+                    "total": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["Capture"],
+        "summary": "Delete capture session and PCAP file",
+        "operationId": "deleteCaptureSession",
+        "parameters": [
+          { "name": "id", "in": "query", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Deleted" },
+          "400": { "description": "Cannot delete a running session" }
+        }
+      }
+    },
+    "/v1/capture/download": {
+      "get": {
+        "tags": ["Capture"],
+        "summary": "Download PCAP file",
+        "operationId": "downloadCapture",
+        "parameters": [
+          { "name": "id", "in": "query", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "PCAP file stream",
+            "content": {
+              "application/octet-stream": {
+                "schema": { "type": "string", "format": "binary" }
+              }
+            }
+          },
+          "400": { "description": "Capture not completed" }
+        }
+      }
+    },
+    "/v1/capture/presets": {
+      "get": {
+        "tags": ["Capture"],
+        "summary": "List protocol preset templates",
+        "operationId": "getCapturePresets",
+        "responses": {
+          "200": {
+            "description": "Preset list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": { "type": "string" },
+                          "label": { "type": "string" },
+                          "filter": { "type": "string" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -393,6 +543,27 @@ func (h *Handler) SwaggerSpec(w http.ResponseWriter, r *http.Request) {
           "enabled": { "type": "boolean" },
           "created_at": { "type": "string", "format": "date-time" },
           "last_login": { "type": "string", "format": "date-time" }
+        }
+      },
+      "CaptureSession": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "status": { "type": "string", "enum": ["idle", "running", "stopping", "completed", "error"] },
+          "interface": { "type": "string" },
+          "filter": { "type": "string" },
+          "protocol": { "type": "string" },
+          "max_duration": { "type": "integer" },
+          "max_size": { "type": "integer" },
+          "file_path": { "type": "string" },
+          "file_size": { "type": "integer" },
+          "packet_count": { "type": "integer" },
+          "pid": { "type": "integer" },
+          "started_by": { "type": "string" },
+          "started_at": { "type": "string", "format": "date-time" },
+          "stopped_at": { "type": "string", "format": "date-time" },
+          "error": { "type": "string" }
         }
       }
     },

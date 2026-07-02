@@ -282,6 +282,19 @@ func New(h *handler.Handler, wh *ws.WSHandler, lsh *ws.LogStreamHandler, dh *han
 			h.DownloadFile(w, r)
 		case strings.HasPrefix(r.URL.Path, "/api/v1/solutions/"):
 			h.GetSolution(w, r)
+		// 抓包管理
+		case r.URL.Path == "/api/v1/capture/start" && r.Method == http.MethodPost:
+			requireOperator(h.HandleCaptureStart)(w, r)
+		case r.URL.Path == "/api/v1/capture/stop" && r.Method == http.MethodPost:
+			requireOperator(h.HandleCaptureStop)(w, r)
+		case r.URL.Path == "/api/v1/capture/sessions" && r.Method == http.MethodGet:
+			h.HandleCaptureSessions(w, r)
+		case r.URL.Path == "/api/v1/capture/sessions" && r.Method == http.MethodDelete:
+			requireOperator(h.HandleCaptureDelete)(w, r)
+		case r.URL.Path == "/api/v1/capture/download" && r.Method == http.MethodGet:
+			h.HandleCaptureDownload(w, r)
+		case r.URL.Path == "/api/v1/capture/presets" && r.Method == http.MethodGet:
+			h.HandleCapturePresets(w, r)
 		default:
 			http.NotFound(w, r)
 		}

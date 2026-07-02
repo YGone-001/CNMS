@@ -128,9 +128,8 @@ func RequireRole(roles ...string) func(http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			claims, ok := r.Context().Value(claimsKey).(*Claims)
 			if !ok {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusForbidden)
-				json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": "no claims in context"})
+				// Auth 未启用时 context 中无 claims，直接放行
+				next(w, r)
 				return
 			}
 
