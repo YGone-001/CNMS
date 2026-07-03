@@ -66,10 +66,13 @@ xCloud-CNMS 是一个专业的 4G/5G/IMS 核心网监控管理平台，面向电
 |------|------|------|
 | capture | internal/handler/capture.go | 一键抓包（tcpdump 生命周期管理、BPF 校验、WebSocket 进度推送） |
 | capture model | internal/model/capture.go | 抓包会话数据模型（CaptureSession、ProtocolPreset） |
+| signaling | internal/signaling/ | 跨协议信令追踪（parser/correlator/hep） |
+| signaling model | internal/model/signaling.go | 信令数据模型（SignalingMessage、SignalingTrace、MediaQuality） |
+| signaling handler | internal/handler/signaling.go | 信令追踪 API（7 个端点） |
 
-### 前端页面 (React, 26 个)
+### 前端页面 (React, 27 个)
 
-#### 主导航（侧边栏 17 项）
+#### 主导航（侧边栏 18 项）
 
 | 页面 | 文件 | 功能 |
 |------|------|------|
@@ -82,6 +85,7 @@ xCloud-CNMS 是一个专业的 4G/5G/IMS 核心网监控管理平台，面向电
 | AlarmCenter | AlarmCenter.tsx | 告警中心（闭环管理） |
 | FaultDiagnosis | FaultDiagnosis.tsx | 故障诊断（5 种故障类型、发生次数、AI 推荐） |
 | PacketCapture | PacketCapture.tsx | 抓包工具（tcpdump 抓包、12 种协议预设、WebSocket 实时进度、PCAP 下载） |
+| SignalingTrace | SignalingTrace.tsx | 信令追踪（跨协议关联、Ladder Diagram、Homer 集成） |
 | FaultResolution | FaultResolution.tsx | 故障处置（一键修复、验证、状态流转） |
 | LogCenter | LogCenter.tsx | 日志中心（多目录、实时流、日期滚动、告警关联） |
 | ConfigBackups | ConfigBackups.tsx | 配置备份（版本历史、diff 对比） |
@@ -173,6 +177,21 @@ MongoDB (历史指标) → aiops/aggregator.go (每小时聚合)
                   → GET /api/v1/capture/download → http.ServeFile 返回 PCAP
 ```
 
+### 信令追踪流
+
+```
+前端 SignalingTrace → POST /api/v1/signaling/trace (query_type/value/scenario/time_range)
+                   → handler/signaling.go 创建 SignalingTrace (status=running)
+                   → goroutine 异步执行:
+                     → signaling/parser.go 解析 Open5GS/Kamailio/FreeSWITCH 日志
+                     → signaling/parser.go 调用 tshark 解析 pcap 文件
+                     → signaling/hep.go 查询 Homer API 获取 SIP 消息（可选）
+                     → signaling/correlator.go Union-Fist 多维关联
+                     → MongoDB signaling_messages + signaling_traces (状态更新)
+                   → 前端轮询 GET /api/v1/signaling/trace/{id} 检查状态
+                   → 完成后加载消息 → LadderDiagram / MessageDetail / MediaQuality 展示
+```
+
 ### 外部数据集成
 
 ```
@@ -186,7 +205,7 @@ MySQL scscf                → handler/business_metrics.go → S-CSCF 注册数
 
 ## 数据存储
 
-- **MongoDB (xCloud)**: 20+ 集合（告警、指标、订户、站点、任务、备份、知识库、审计日志、AIOps 子集合、通知、KPI、capture_sessions 等）
+- **MongoDB (xCloud)**: 23+ 集合（告警、指标、订户、站点、任务、备份、知识库、审计日志、AIOps 子集合、通知、KPI、capture_sessions、signaling_messages、signaling_traces、media_quality 等）
 - **MongoDB (open5gs)**: open5gs 核心网订户数据
 - **MySQL (hss_db)**: IMS 订户数据（IMPI/IMPU 表）
 - **MySQL (scscf)**: S-CSCF 注册/联系数据
@@ -221,6 +240,7 @@ MySQL scscf                → handler/business_metrics.go → S-CSCF 注册数
 - **部署**: 部署模板、状态、组件状态
 - **发现**: NF 自动发现
 - **抓包**: 启动/停止 tcpdump、会话查询、PCAP 下载、协议预设列表
+- **信令追踪**: 创建追踪、查询消息、媒体质量、历史记录、Homer 状态
 
 ---
 
@@ -290,6 +310,8 @@ AIOps 后台任务（通过 Scheduler）：
 9. **配置备份 SHA-256**: 校验和去重，跳过未变更配置
 10. **日志流动态过滤**: 客户端可在连接中发送 JSON 修改过滤条件
 11. **auth 未启用时 RequireRole 放行**: auth.enabled=false 时 JWT 中间件不运行，context 无 claims；RequireRole 遇到无 claims 时直接放行，handler 内部检查同样跳过角色校验
+12. **信令追踪异步执行**: 创建追踪后立即返回 trace_id，后台 goroutine 执行解析/关联/存储，前端轮询状态
+13. **Union-Find 跨协议关联**: 使用 10 维标识（IMSI/SUPI/MSISDN/SIP URI/TEID/UE IP 等）关联不同协议消息到同一用户会话
 
 ---
 
@@ -318,6 +340,7 @@ AIOps 后台任务（通过 Scheduler）：
 - 前端深色/浅色主题、i18n 国际化
 - 审计日志、用户管理
 - 一键抓包（tcpdump 管理、12 种协议预设、BPF 注入防护、WebSocket 实时进度、PCAP 下载、RBAC 权限控制）
+- 跨协议信令追踪（15 种协议解析、Union-Find 关联引擎、Ladder Diagram 梯形图、Homer HEP 集成、媒体质量 MOS 仪表盘）
 
 ### 规划中
 

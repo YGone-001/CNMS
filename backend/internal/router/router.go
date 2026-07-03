@@ -295,6 +295,23 @@ func New(h *handler.Handler, wh *ws.WSHandler, lsh *ws.LogStreamHandler, dh *han
 			h.HandleCaptureDownload(w, r)
 		case r.URL.Path == "/api/v1/capture/presets" && r.Method == http.MethodGet:
 			h.HandleCapturePresets(w, r)
+		// 信令追踪
+		case r.URL.Path == "/api/v1/signaling/trace" && r.Method == http.MethodPost:
+			requireOperator(h.HandleSignalingCreateTrace)(w, r)
+		case r.URL.Path == "/api/v1/signaling/traces" && r.Method == http.MethodGet:
+			h.HandleSignalingListTraces(w, r)
+		case r.URL.Path == "/api/v1/signaling/homer/status" && r.Method == http.MethodGet:
+			h.HandleSignalingHomerStatus(w, r)
+		case strings.HasPrefix(r.URL.Path, "/api/v1/signaling/trace/") && r.Method == http.MethodGet:
+			if strings.HasSuffix(r.URL.Path, "/messages") {
+				h.HandleSignalingGetMessages(w, r)
+			} else if strings.HasSuffix(r.URL.Path, "/media") {
+				h.HandleSignalingGetMedia(w, r)
+			} else {
+				h.HandleSignalingGetTrace(w, r)
+			}
+		case strings.HasPrefix(r.URL.Path, "/api/v1/signaling/trace/") && r.Method == http.MethodDelete:
+			requireOperator(h.HandleSignalingDeleteTrace)(w, r)
 		default:
 			http.NotFound(w, r)
 		}

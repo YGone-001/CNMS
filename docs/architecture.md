@@ -1,6 +1,6 @@
 # 系统架构
 
-xCloud-CNMS 系统架构设计文档（v1.4.1）。
+xCloud-CNMS 系统架构设计文档（v1.5.0）。
 
 ---
 
@@ -54,8 +54,8 @@ xCloud-CNMS 系统架构设计文档（v1.4.1）。
 
 | 组件 | 说明 |
 |------|------|
-| **前端 (React)** | 用户界面，25 个页面组件，支持深色/浅色主题、i18n 国际化 |
-| **后端 (Go)** | 业务逻辑，17 个 handler 模块，3 个 WebSocket 端点 |
+| **前端 (React)** | 用户界面，26 个页面组件，支持深色/浅色主题、i18n 国际化 |
+| **后端 (Go)** | 业务逻辑，18 个 handler 模块，3 个 WebSocket 端点 |
 | **MongoDB** | 数据存储，20+ 集合，持久化 |
 | **WebSocket** | 实时通信，监控数据推送、日志流、部署状态 |
 | **Monitor** | 进程探测、NF 接口健康检查、NF 自动发现 |
@@ -105,6 +105,8 @@ backend/
     │   ├── deployment.go           # 部署模板管理
     │   ├── knowledge_base.go       # 知识库增强（统计/搜索/文件）
     │   ├── mml.go                  # MML 命令执行
+    │   ├── capture.go              # 抓包会话管理（start/stop/sessions/download/delete/presets）
+    │   ├── signaling.go            # 信令追踪 API（create/get/messages/media/list/delete/homer-status）
     │   └── swagger.go              # OpenAPI 3.0 规范
     ├── middleware/
     │   └── ratelimit.go            # 限流中间件（20 req/s, burst 40）
@@ -121,7 +123,9 @@ backend/
     │   ├── config_backup.go        # 配置备份模型
     │   ├── telecom_kpi.go          # 电信 KPI 模型
     │   ├── aiops.go                # AIOps 模型（异常/根因/预测/趋势）
-    │   └── discovery.go            # NF 发现模型
+    │   ├── discovery.go            # NF 发现模型
+    │   ├── capture.go              # 抓包会话模型
+    │   └── signaling.go            # 信令追踪模型（SignalingMessage/SignalingTrace/MediaQuality）
     ├── mongo/
     │   └── client.go               # MongoDB 客户端封装
     ├── monitor/
@@ -141,6 +145,10 @@ backend/
     │   ├── predictor.go            # 容量预测
     │   ├── rca.go                  # 根因分析（告警触发）
     │   └── trend.go                # 趋势分析
+    ├── signaling/
+    │   ├── parser.go               # 信令日志解析（Open5GS/Kamailio/FreeSWITCH/tshark）
+    │   ├── correlator.go           # 跨协议关联引擎（Union-Find）
+    │   └── hep.go                  # Homer HEP 客户端
     └── ws/
         ├── handler.go              # 监控 WebSocket（进程状态 + 告警生成）
         ├── logstream.go            # 日志流 WebSocket（动态过滤）
@@ -163,7 +171,7 @@ backend/
 
 #### 3. 处理器模块 (handler)
 
-- 17 个 handler 文件覆盖全部业务逻辑
+- 19 个 handler 文件覆盖全部业务逻辑
 - flat switch 路由注册（非第三方路由库）
 - 前端 dist 通过 `//go:embed` 嵌入 Go 二进制
 
@@ -181,13 +189,28 @@ backend/
 - **rca**: 根因分析（告警插入时自动触发）
 - **trend**: 趋势分析和早期预警
 
-#### 6. WebSocket 模块
+#### 6. 信令追踪模块 (signaling)
+
+- **parser**: 多源日志解析器
+  - Open5GS 日志：NAS/NGAP/S1AP/GTPv2C/PFCP/Diameter，提取 IMSI/SUPI/TEID
+  - Kamailio syslog：SIP 方法/状态码/Call-ID + Diameter Cx (UAR/MAA/SAR)
+  - FreeSWITCH 日志：SDP/RTP 统计/编解码器/呼叫事件
+  - tshark pcap：全协议解析（SIP/Diameter/GTPv2C/PFCP/S1AP/NGAP/NAS）
+- **correlator**: Union-Find 跨协议关联引擎
+  - 10 维标识关联（IMSI/SUPI/MSISDN/SIP URI/TEID/UE IP/Call-ID 等）
+  - 网元排序（按 3GPP 架构顺序：UE→gNB→AMF→HSS→SGW→PGW→P-CSCF→S-CSCF）
+  - 摘要生成（注册/鉴权/会话/IMS 注册/通话/短信各环节成功/失败判断）
+- **hep**: Homer HEP 集成客户端
+  - 认证、搜索、Call Flow 获取、格式转换
+  - 支持按 Call-ID/SIP URI/自定义标识搜索
+
+#### 7. WebSocket 模块
 
 三个 WebSocket 端点：
 
 | 端点 | 用途 | 推送间隔 |
 |------|------|----------|
-| `/api/v1/monitor/ws` | NF 进程状态、告警生成、指标持久化 | 2s (状态), 30s (指标) |
+| `/api/v1/monitor/ws` | NF 进程状态、告警生成、指标持久化、抓包进度 | 2s (状态), 30s (指标) |
 | `/api/v1/nf/logs/ws` | 实时日志流（支持动态 level/keyword 过滤） | 500ms 轮询 |
 | `/api/v1/deployment/ws` | 部署状态 + EPC/IMS 用户数 | 5s (部署), 10s (业务) |
 
@@ -273,7 +296,7 @@ frontend/
 
 ### 前端路由
 
-#### 主导航（侧边栏 16 项）
+#### 主导航（侧边栏 18 项）
 
 | 路由 | 页面 | 功能 |
 |------|------|------|
@@ -285,6 +308,8 @@ frontend/
 | `/metrics` | MetricsHistory | 实时指标监控 |
 | `/alarms` | AlarmCenter | 告警中心 |
 | `/fault-diagnosis` | FaultDiagnosis | 故障诊断 |
+| `/capture` | PacketCapture | 一键抓包（12 种协议预设、实时进度、PCAP 下载） |
+| `/signaling` | SignalingTrace | 信令追踪（跨协议关联、Ladder Diagram、Homer 集成） |
 | `/fault-resolution` | FaultResolution | 故障处置 |
 | `/logs` | LogCenter | 日志中心 |
 | `/backups` | ConfigBackups | 配置备份 |
@@ -360,6 +385,10 @@ frontend/
 | `trend_alerts` | model/aiops.go | 趋势预警 |
 | `interface_health` | (handler 内联) | NF 接口健康探测结果 |
 | `telecom_kpi` | model/telecom_kpi.go | 电信域 KPI 指标 |
+| `capture_sessions` | model/capture.go | 抓包会话（状态、文件路径、进度、PID） |
+| `signaling_messages` | model/signaling.go | 信令消息（15 种协议、跨协议关联标识） |
+| `signaling_traces` | model/signaling.go | 信令追踪会话（查询条件、网元列表、摘要） |
+| `media_quality` | model/signaling.go | RTP/RTCP 媒体质量（MOS、丢包、抖动） |
 | `settings` | (handler 内联) | 键值对设置（如部署模板） |
 
 ### 核心集合结构
@@ -469,6 +498,99 @@ frontend/
   ],
   "recommendations": [String],
   "created_at": DateTime
+}
+```
+
+#### 8. signaling_messages (信令消息)
+
+```json
+{
+  "_id": ObjectId,
+  "trace_id": String,
+  "timestamp": DateTime,
+  "protocol": String,
+  "interface": String,
+  "direction": String,
+  "method": String,
+  "status_code": Number,
+  "src_entity": String,
+  "dst_entity": String,
+  "src_ip": String,
+  "dst_ip": String,
+  "src_port": Number,
+  "dst_port": Number,
+  "identifiers": {
+    "imsi": String,
+    "supi": String,
+    "msisdn": String,
+    "impu": String,
+    "impi": String,
+    "sip_uri": String,
+    "guti": String,
+    "fiveg_guti": String,
+    "teid": String,
+    "ue_ipv4": String,
+    "ue_ipv6": String,
+    "call_id": String
+  },
+  "details": Object,
+  "raw_preview": String,
+  "session_id": String,
+  "call_id": String
+}
+```
+
+#### 9. signaling_traces (信令追踪)
+
+```json
+{
+  "_id": ObjectId,
+  "trace_id": String,
+  "query_type": String,
+  "query_value": String,
+  "scenario": String,
+  "status": String,
+  "message_count": Number,
+  "entities": [String],
+  "time_range": { "start": DateTime, "end": DateTime },
+  "summary": {
+    "reg_ok": Boolean,
+    "auth_ok": Boolean,
+    "session_ok": Boolean,
+    "ims_reg_ok": Boolean,
+    "call_ok": Boolean,
+    "sms_ok": Boolean,
+    "error_step": String,
+    "error_detail": String
+  },
+  "created_at": DateTime,
+  "created_by": String
+}
+```
+
+#### 10. media_quality (媒体质量)
+
+```json
+{
+  "_id": ObjectId,
+  "trace_id": String,
+  "call_id": String,
+  "direction": String,
+  "codec": String,
+  "src_ip": String,
+  "src_port": Number,
+  "dst_ip": String,
+  "dst_port": Number,
+  "ssrc": String,
+  "pkts_sent": Number,
+  "pkts_lost": Number,
+  "loss_rate": Number,
+  "jitter": Number,
+  "mos": Number,
+  "rtd": Number,
+  "relay_ip": String,
+  "relay_port": Number,
+  "timestamp": DateTime
 }
 ```
 

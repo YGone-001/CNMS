@@ -14,6 +14,7 @@ const en = {
     alarms: 'Alarm Center',
     faultDiagnosis: 'Fault Diagnosis',
     packetCapture: 'Packet Capture',
+    signalingTrace: 'Signaling Trace',
     faultResolution: 'Fault Resolution',
     logCenter: 'Log Center',
     configBackups: 'Config Backups',

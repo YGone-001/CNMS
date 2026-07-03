@@ -22,6 +22,7 @@ import {
   Settings,
   BookOpen,
   Users,
+  GitBranch,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { MonitorProvider } from '@/context/MonitorContext';
@@ -52,6 +53,7 @@ import FaultResolution from './pages/FaultResolution';
 import LogCenter from './pages/LogCenter';
 import FaultDiagnosis from './pages/FaultDiagnosis';
 import PacketCapture from './pages/PacketCapture';
+import SignalingTrace from './pages/SignalingTrace';
 
 // Auth helpers
 function getAuthToken(): string | null {
@@ -127,6 +129,7 @@ function useNavItems(): NavItem[] {
     { path: '/alarms', label: t('nav.alarms'), icon: Bell, badge: alarmCount || undefined },
     { path: '/fault-diagnosis', label: t('nav.faultDiagnosis'), icon: Zap },
     { path: '/capture', label: t('nav.packetCapture'), icon: Radio },
+    { path: '/signaling', label: t('nav.signalingTrace'), icon: GitBranch },
     { path: '/fault-resolution', label: t('nav.faultResolution'), icon: Lightbulb },
     { path: '/logs', label: t('nav.logCenter'), icon: FileText },
     { path: '/backups', label: t('nav.configBackups'), icon: Database },
@@ -400,6 +403,7 @@ export default function App() {
           <Route path="/alarms" element={<AlarmCenter />} />
           <Route path="/fault-diagnosis" element={<FaultDiagnosis />} />
           <Route path="/capture" element={<PacketCapture />} />
+          <Route path="/signaling" element={<SignalingTrace />} />
           <Route path="/fault-resolution" element={<FaultResolution />} />
           <Route path="/logs" element={<LogCenter />} />
           <Route path="/backups" element={<ConfigBackups />} />

@@ -15,7 +15,6 @@ import {
   AlertTriangle,
   Settings,
   Download,
-  Upload,
   Terminal,
   ChevronDown,
   ChevronRight,

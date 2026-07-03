@@ -99,6 +99,11 @@ func main() {
 	}
 
 	h := handler.NewWithAllDB(mc, mysqlDB, scscfDB, cfg.LogDir, cfg.Auth)
+	// 初始化 Homer 客户端（如果启用）
+	if cfg.Homer.Enabled {
+		h.SetHomer(cfg.Homer)
+		log.Printf("Homer integration enabled: %s", cfg.Homer.APIURL)
+	}
 	wh := ws.NewWSHandler(mc, cfg.Notify.WebhookURL, cfg.Notify.MinLevel, cfg.Auth.Enabled)
 	lsh := ws.NewLogStreamHandler(cfg.LogDir, cfg.Auth.Enabled)
 	// 添加额外日志目录

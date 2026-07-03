@@ -16,6 +16,7 @@ const zh = {
     alarms: '告警中心',
     faultDiagnosis: '故障诊断',
     packetCapture: '抓包工具',
+    signalingTrace: '信令追踪',
     faultResolution: '故障处置',
     logCenter: '日志中心',
     configBackups: '配置备份',

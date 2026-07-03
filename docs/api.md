@@ -1,6 +1,6 @@
 # API 文档
 
-xCloud-CNMS RESTful API 接口文档（v1.4.1）。
+xCloud-CNMS RESTful API 接口文档（v1.5.0）。
 
 ---
 
@@ -29,6 +29,8 @@ xCloud-CNMS RESTful API 接口文档（v1.4.1）。
   - [部署](#部署)
   - [NF 发现](#nf-发现)
   - [MML](#mml)
+  - [抓包](#抓包)
+  - [信令追踪](#信令追踪)
 - [WebSocket API](#websocket-api)
 - [RBAC 权限](#rbac-权限)
 
@@ -1024,13 +1026,382 @@ POST /api/v1/mml/execute
 
 ---
 
+### 抓包
+
+#### 开始抓包
+
+```http
+POST /api/v1/capture/start
+```
+
+**请求体:**
+
+```json
+{
+  "name": "VoLTE 注册抓包",
+  "interface": "eth0",
+  "filter": "sip",
+  "protocol": "volte_full",
+  "max_duration": 300,
+  "max_size": 100
+}
+```
+
+| 参数 | 类型 | 必需 | 说明 |
+|------|------|------|------|
+| `name` | string | 是 | 会话名称 |
+| `interface` | string | 是 | 抓包网卡（如 eth0、lo、any） |
+| `filter` | string | 否 | BPF 过滤表达式，支持安全校验 |
+| `protocol` | string | 否 | 协议预设 ID（如 volte_full、sip） |
+| `max_duration` | int | 否 | 最大抓包时长（秒），默认 300，上限 3600 |
+| `max_size` | int | 否 | 最大文件大小（MB），默认 100，上限 1024 |
+
+**响应:**
+
+```json
+{
+  "status": "success",
+  "message": "capture started",
+  "session_id": "688d92c6...",
+  "file_path": "/tmp/captures/cap_20260702_180500.pcap"
+}
+```
+
+**安全约束:**
+- BPF 注入防护：过滤表达式不允许 `;|&$\`` 等 shell 特殊字符
+- 并发限制：最多同时 5 个抓包会话
+- 权限：operator+ 角色
+
+#### 停止抓包
+
+```http
+POST /api/v1/capture/stop
+```
+
+**请求体:**
+
+```json
+{
+  "session_id": "688d92c6..."
+}
+```
+
+**响应:**
+
+```json
+{
+  "status": "success",
+  "message": "capture stopped",
+  "session_id": "688d92c6...",
+  "file_path": "/tmp/captures/cap_20260702_180500.pcap"
+}
+```
+
+#### 获取抓包会话列表
+
+```http
+GET /api/v1/capture/sessions
+```
+
+**响应:**
+
+```json
+{
+  "status": "success",
+  "sessions": [
+    {
+      "id": "688d92c6...",
+      "name": "VoLTE 注册抓包",
+      "status": "completed",
+      "interface": "eth0",
+      "filter": "sip",
+      "protocol": "volte_full",
+      "file_path": "/tmp/captures/cap_20260702_180500.pcap",
+      "file_size": 5242880,
+      "packet_count": 12345,
+      "started_by": "admin",
+      "started_at": "2026-07-02T18:05:00+08:00",
+      "stopped_at": "2026-07-02T18:10:00+08:00"
+    }
+  ]
+}
+```
+
+#### 下载 PCAP 文件
+
+```http
+GET /api/v1/capture/download?id=<session_id>
+```
+
+返回 `application/octet-stream` 格式的 PCAP 文件。
+
+#### 删除抓包会话
+
+```http
+DELETE /api/v1/capture/sessions?id=<session_id>
+```
+
+同时删除会话记录和 PCAP 文件。权限：operator+
+
+#### 获取协议预设
+
+```http
+GET /api/v1/capture/presets
+```
+
+**响应:**
+
+```json
+{
+  "status": "success",
+  "presets": [
+    {
+      "id": "volte_full",
+      "name": "VoLTE 完整流程",
+      "description": "SIP + RTP + Diameter + GTP 完整 VoLTE 流程",
+      "filter": "portrange 5060-5080 or portrange 10000-20000 or port 3868 or port 2123 or port 2152"
+    },
+    {
+      "id": "sip",
+      "name": "SIP 信令",
+      "description": "SIP 注册/呼叫/消息信令",
+      "filter": "portrange 5060-5080"
+    }
+  ]
+}
+```
+
+共 12 种预设：`volte_full`、`sip`、`diameter`、`gtp`、`s1ap_ngap`、`rtp_media`、`dns`、`pfcp`、`gtpv2`、`ipsec_esp`、`icmp`、`all_telecom`。
+
+**抓包进度 WebSocket:**
+
+通过 `/api/v1/monitor/ws` 订阅 `capture_progress` 消息类型：
+
+```json
+{
+  "type": "capture_progress",
+  "data": {
+    "session_id": "688d92c6...",
+    "status": "running",
+    "file_size": 5242880,
+    "packet_count": 12345,
+    "elapsed_seconds": 60,
+    "progress": 20
+  }
+}
+```
+
+---
+
+### 信令追踪
+
+#### 创建追踪任务
+
+```http
+POST /api/v1/signaling/trace
+```
+
+**请求体:**
+
+```json
+{
+  "query_type": "imsi",
+  "query_value": "460001234567890",
+  "scenario": "all",
+  "time_range": {
+    "start": "2026-07-01T00:00:00Z",
+    "end": "2026-07-01T23:59:59Z"
+  },
+  "sources": ["logs", "pcap"]
+}
+```
+
+| 参数 | 类型 | 必需 | 说明 |
+|------|------|------|------|
+| `query_type` | string | 是 | 查询类型：imsi/supi/msisdn/sip_uri/impu/impi/ip/teid/call_id/guti/fiveg_guti |
+| `query_value` | string | 是 | 查询值 |
+| `scenario` | string | 否 | 场景：5g_registration/4g_attach/ims_registration/volte_call/vonr_call/sms_sgs/sms_nas/sms_ims/all（默认 all） |
+| `time_range` | object | 否 | 时间范围（默认最近 24 小时） |
+| `sources` | array | 否 | 数据来源：logs/pcap（默认全部） |
+
+**响应:**
+
+```json
+{
+  "status": "ok",
+  "message": "trace started",
+  "data": { "trace_id": "a2238643-6cdd-425c-aa57-7619885cfd77" }
+}
+```
+
+**说明:** 创建后立即返回 trace_id，后台异步执行解析/关联/存储。前端轮询查询状态。
+
+#### 查询追踪状态
+
+```http
+GET /api/v1/signaling/trace/{traceId}
+```
+
+**响应:**
+
+```json
+{
+  "status": "ok",
+  "data": {
+    "trace_id": "a2238643...",
+    "query_type": "imsi",
+    "query_value": "460001234567890",
+    "scenario": "all",
+    "status": "completed",
+    "message_count": 42,
+    "entities": ["UE", "gNB", "AMF", "SMF", "UPF"],
+    "time_range": { "start": "...", "end": "..." },
+    "summary": {
+      "reg_ok": true,
+      "auth_ok": true,
+      "session_ok": true,
+      "ims_reg_ok": false,
+      "call_ok": false,
+      "sms_ok": false
+    },
+    "created_at": "...",
+    "created_by": "admin"
+  }
+}
+```
+
+| 状态 | 说明 |
+|------|------|
+| `running` | 解析中，继续轮询 |
+| `completed` | 完成，可加载消息 |
+| `error` | 失败 |
+
+#### 查询关联消息
+
+```http
+GET /api/v1/signaling/trace/{traceId}/messages?protocol=SIP&page=1&page_size=50
+```
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `protocol` | string | 按协议过滤：NAS/NGAP/S1AP/SIP/Diameter/GTPv2C/PFCP/RTP 等 |
+| `entity` | string | 按网元过滤 |
+| `page` | int | 页码（默认 1） |
+| `page_size` | int | 每页条数（默认 50，上限 500） |
+
+**响应:**
+
+```json
+{
+  "status": "ok",
+  "messages": [
+    {
+      "id": "...",
+      "trace_id": "...",
+      "timestamp": "2026-07-01T10:30:45.123Z",
+      "protocol": "NAS",
+      "interface": "N1",
+      "direction": "request",
+      "method": "Registration Request",
+      "src_entity": "UE",
+      "dst_entity": "AMF",
+      "src_ip": "10.45.0.2",
+      "dst_ip": "10.45.0.1",
+      "identifiers": { "imsi": "460001234567890", "supi": "imsi-460001234567890" },
+      "call_id": "",
+      "session_id": "5"
+    }
+  ],
+  "total": 42,
+  "page": 1,
+  "per_page": 50
+}
+```
+
+#### 查询媒体质量
+
+```http
+GET /api/v1/signaling/trace/{traceId}/media?page=1&page_size=50
+```
+
+**响应:**
+
+```json
+{
+  "status": "ok",
+  "media": [
+    {
+      "trace_id": "...",
+      "call_id": "abc123@host",
+      "direction": "caller_to_callee",
+      "codec": "AMR-WB",
+      "src_ip": "10.45.0.2",
+      "src_port": 4000,
+      "dst_ip": "10.45.0.5",
+      "dst_port": 4001,
+      "ssrc": "0x12345678",
+      "pkts_sent": 1500,
+      "pkts_lost": 3,
+      "loss_rate": 0.002,
+      "jitter": 12.5,
+      "mos": 4.2,
+      "rtd": 45.0
+    }
+  ],
+  "total": 2,
+  "page": 1,
+  "per_page": 50
+}
+```
+
+#### 列出历史追踪
+
+```http
+GET /api/v1/signaling/traces?status=completed&page=1&page_size=20
+```
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `status` | string | 按状态过滤：running/completed/error |
+| `query_type` | string | 按查询类型过滤 |
+| `page` | int | 页码 |
+| `page_size` | int | 每页条数 |
+
+#### 删除追踪
+
+```http
+DELETE /api/v1/signaling/trace/{traceId}
+```
+
+删除追踪记录及关联的所有消息和媒体质量数据。需要 operator+ 角色。
+
+#### Homer 状态
+
+```http
+GET /api/v1/signaling/homer/status
+```
+
+**响应:**
+
+```json
+{
+  "status": "ok",
+  "enabled": true,
+  "healthy": true,
+  "version": "7.x",
+  "api_url": "http://127.0.0.1:9080"
+}
+```
+
+---
+
 ## WebSocket API
 
 ### 三个 WebSocket 端点
 
 | 端点 | 用途 | 推送间隔 |
 |------|------|----------|
-| `/api/v1/monitor/ws` | NF 进程状态、告警生成、指标持久化 | 2s (状态), 30s (指标) |
+| `/api/v1/monitor/ws` | NF 进程状态、告警生成、指标持久化、抓包进度 | 2s (状态), 30s (指标) |
 | `/api/v1/nf/logs/ws` | 实时日志流（支持动态 level/keyword 过滤） | 500ms 轮询 |
 | `/api/v1/deployment/ws` | 部署状态 + EPC/IMS 用户数 | 5s (部署), 10s (业务) |
 
@@ -1101,6 +1472,23 @@ const deployWs = new WebSocket('ws://localhost:8080/api/v1/deployment/ws?token=<
     "pid": null
   },
   "timestamp": "2026-07-01T10:30:00Z"
+}
+```
+
+#### 抓包进度
+
+```json
+{
+  "type": "capture_progress",
+  "data": {
+    "session_id": "688d92c6...",
+    "status": "running",
+    "file_size": 5242880,
+    "packet_count": 12345,
+    "elapsed_seconds": 60,
+    "progress": 20
+  },
+  "timestamp": "2026-07-02T18:06:00+08:00"
 }
 ```
 
@@ -1180,5 +1568,6 @@ curl -s http://localhost:8080/api/v1/alarms \
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| v1.5.0 | 2026-07-02 | 新增抓包 API（start/stop/sessions/download/delete/presets）、抓包进度 WebSocket |
 | v1.4.1 | 2026-07-01 | 全面更新：补充告警规则、通知、指标、UE 信息、报表、部署、NF 发现等 API |
 | v1.4.1 | 2026-06-01 | 初始版本 |

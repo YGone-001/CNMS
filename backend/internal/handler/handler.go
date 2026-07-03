@@ -17,6 +17,7 @@ import (
 	"xcloud-cnms/internal/mml"
 	"xcloud-cnms/internal/model"
 	"xcloud-cnms/internal/mongo"
+	"xcloud-cnms/internal/signaling"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -31,6 +32,8 @@ type Handler struct {
 	LogDir     string
 	Auth       config.AuthConfig
 	UploadDir  string // 知识库文件上传目录
+	Homer      *signaling.HomerClient
+	HomerCfg   config.HomerConfig
 }
 
 // New 创建 Handler 实例
@@ -46,6 +49,20 @@ func NewWithMySQL(mc *mongo.Client, mysqlDB *sql.DB, logDir string, authCfg conf
 // NewWithAllDB 创建带所有数据库的 Handler 实例
 func NewWithAllDB(mc *mongo.Client, mysqlDB *sql.DB, scscfDB *sql.DB, logDir string, authCfg config.AuthConfig) *Handler {
 	return &Handler{Mongo: mc, MySQLDB: mysqlDB, SCSCFDB: scscfDB, LogDir: logDir, Auth: authCfg, UploadDir: "uploads/kb"}
+}
+
+// SetHomer 设置 Homer 客户端
+func (h *Handler) SetHomer(cfg config.HomerConfig) {
+	h.HomerCfg = cfg
+	if cfg.Enabled {
+		h.Homer = signaling.NewHomerClient(signaling.HomerConfig{
+			Enabled:   cfg.Enabled,
+			APIURL:    cfg.APIURL,
+			Username:  cfg.Username,
+			Password:  cfg.Password,
+			AuthToken: cfg.AuthToken,
+		})
+	}
 }
 
 // LoginRequest 登录请求

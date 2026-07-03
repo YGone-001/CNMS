@@ -65,6 +65,22 @@ xCloud-CNMS 是一个专业的 4G/5G/IMS 核心网监控管理平台，面向电
 - 一键修复、验证、状态流转
 - 根因候选分析（置信度排序）
 
+### 📦 一键抓包
+- 12 种电信协议预设（VoLTE、SIP、Diameter、GTP、NGAP、PFCP 等）
+- BPF 过滤表达式 + 注入防护
+- WebSocket 实时进度推送（文件大小、包计数、进度百分比）
+- PCAP 文件下载、会话管理
+- 并发限制（最多 5 个）、资源上限（时长/文件大小）
+
+### 🔍 信令追踪
+- 跨协议信令追踪（15 种协议：NAS/NGAP/S1AP/SIP/Diameter/GTPv2C/PFCP/RTP 等）
+- 多源日志解析（Open5GS/Kamailio/FreeSWITCH 日志 + tshark pcap）
+- Union-Find 跨协议关联引擎（10 维标识关联：IMSI/SUPI/MSISDN/TEID/UE IP 等）
+- Ladder Diagram 梯形时序图（纯 SVG，虚拟滚动，协议着色，错误标记）
+- 消息详情面板（按协议类型展示不同字段，SDP 解析，原始数据预览）
+- 媒体质量展示（MOS 仪表盘、丢包/抖动/RTD 指标、rtpengine 中继映射）
+- Homer HEP 集成（iframe 嵌入 + API 模式双模式）
+
 ### 📝 日志中心
 - 多目录日志文件、日期滚动
 - 实时日志流 WebSocket（支持运行时动态 level/keyword 过滤）
@@ -194,6 +210,7 @@ MML（Man-Machine Language）模拟电信设备人机命令交互：
 | 报表 | `/api/v1/reports/*` | CSV 导出 + 汇总 |
 | 部署 | `/api/v1/deployment/*` `/api/v1/deployment/ws` | 模板 + 状态 WebSocket |
 | 发现 | `/api/v1/nf/discovery` `/api/v1/nf/discovered` | NF 自动发现 |
+| 抓包 | `/api/v1/capture/start` `/api/v1/capture/stop` `/api/v1/capture/sessions` `/api/v1/capture/download` `/api/v1/capture/presets` | 一键抓包生命周期 |
 
 完整 API 文档请访问 Web UI 中的 `/docs` 页面，或参阅 [API 文档](docs/api.md)。
 
@@ -203,7 +220,7 @@ MML（Man-Machine Language）模拟电信设备人机命令交互：
 
 | 端点 | 用途 | 推送间隔 |
 |------|------|----------|
-| `/api/v1/monitor/ws` | NF 进程状态、告警生成、指标持久化 | 2s / 30s |
+| `/api/v1/monitor/ws` | NF 进程状态、告警生成、指标持久化、抓包进度 | 2s / 30s |
 | `/api/v1/nf/logs/ws` | 实时日志流（动态过滤） | 500ms |
 | `/api/v1/deployment/ws` | 部署状态 + EPC/IMS 用户数 | 5s / 10s |
 
@@ -214,7 +231,7 @@ MML（Man-Machine Language）模拟电信设备人机命令交互：
 | 角色 | 权限 |
 |------|------|
 | **admin** | 全部权限，包括用户管理 |
-| **operator** | MML 执行、订户/任务/通知/备份/站点/知识库管理 |
+| **operator** | MML 执行、订户/任务/通知/备份/站点/知识库/抓包管理 |
 | **viewer** | 所有数据只读访问 |
 
 ---
@@ -263,10 +280,10 @@ xCloud-CNMS/
 │   └── internal/
 │       ├── auth/jwt.go             # JWT 认证
 │       ├── config/                 # 配置加载 + 热重载
-│       ├── handler/                # HTTP 处理器（17 个文件）
+│       ├── handler/                # HTTP 处理器（18 个文件）
 │       ├── middleware/ratelimit.go # 限流中间件
 │       ├── mml/parser.go          # MML 命令解析器
-│       ├── model/                  # 数据模型（10 个文件）
+│       ├── model/                  # 数据模型（11 个文件）
 │       ├── mongo/client.go        # MongoDB 封装
 │       ├── monitor/                # 进程探测 + 健康检查 + NF 发现
 │       ├── aiops/                  # AIOps 引擎（5 个文件）
@@ -276,7 +293,7 @@ xCloud-CNMS/
 │       └── ws/                    # WebSocket（3 个文件）
 ├── frontend/                       # React 18 + TypeScript
 │   └── src/
-│       ├── pages/                  # 页面组件（25 个）
+│       ├── pages/                  # 页面组件（26 个）
 │       ├── components/             # 共享组件
 │       ├── context/                # React Context（含 i18n）
 │       ├── hooks/                  # 自定义 Hooks

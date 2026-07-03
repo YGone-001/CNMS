@@ -212,13 +212,75 @@ P-CSCF 已有多个备份版本：
 
 ---
 
+## 阶段七：跨协议信令追踪 (2026-07-03)
+
+**状态**: ✅ 已完成
+
+### 已完成内容
+
+**后端（Go）**：
+- `model/signaling.go` — 6 个数据结构（SignalingMessage、MessageIdentifiers、SignalingTrace、TraceSummary、MediaQuality、TimeRange），3 个 MongoDB 集合
+- `signaling/parser.go` — 4 个日志解析器（Open5GS、Kamailio、FreeSWITCH、tshark pcap），15 种协议支持
+- `signaling/correlator.go` — Union-Find 跨协议关联引擎（10 维标识关联）、网元排序、摘要生成
+- `signaling/hep.go` — Homer API 客户端（认证、搜索、Call Flow、格式转换）
+- `handler/signaling.go` — 7 个 API handler（create/get/messages/media/list/delete/homer-status）
+- `config/config.go` — 新增 HomerConfig 配置结构
+- `router/router.go` — 新增 7 条信令追踪路由
+- `main.go` — Homer 客户端初始化
+
+**前端（React/TypeScript）**：
+- `types/signaling.ts` — 完整类型定义（协议颜色、网元图标、查询类型、场景选项、摘要步骤）
+- `pages/SignalingTrace.tsx` — 主页面（1028 行），查询面板、场景快捷按钮、追踪历史、摘要卡片、视图模式切换（Table/Ladder/Homer）
+- `components/LadderDiagram.tsx` — 纯 SVG 梯形时序图（618 行），虚拟滚动、协议着色、错误标记、时间断裂、tooltip 交互
+- `components/MessageDetail.tsx` — 消息详情面板（567 行），4 个 Tab（Summary/SDP/Raw/Relations），按协议类型展示不同字段
+- `components/MediaQuality.tsx` — 媒体质量展示（475 行），MOS 仪表盘（ECharts）、丢包/抖动/RTD 指标卡片、rtpengine 中继映射
+- `components/HomerIntegration.tsx` — Homer 集成（409 行），iframe 嵌入 + API 模式双模式
+- `App.tsx` — 路由 /signaling + 侧边栏菜单项（GitBranch 图标）
+- `StatusBar.tsx` — 页面标题映射
+- `locales/zh.ts` / `locales/en.ts` — signalingTrace 词条
+
+### Bug 修复
+
+- 修复路由未注册问题（router.go 缺少信令追踪路由）
+- 修复 Homer 客户端未初始化问题（main.go 缺少 SetHomer 调用）
+- 修复空数据页面崩溃问题（activeTrace.entities/summary 空值访问）
+- 修复已有 TS 错误（AgentManagement/LogCenter/FaultDiagnosis 未使用导入）
+
+### 新增文件
+
+- `backend/internal/model/signaling.go` (137 行)
+- `backend/internal/signaling/parser.go` (1439 行)
+- `backend/internal/signaling/correlator.go` (641 行)
+- `backend/internal/signaling/hep.go` (535 行)
+- `backend/internal/handler/signaling.go` (731 行)
+- `frontend/src/types/signaling.ts` (321 行)
+- `frontend/src/pages/SignalingTrace.tsx` (1028 行)
+- `frontend/src/components/LadderDiagram.tsx` (618 行)
+- `frontend/src/components/MessageDetail.tsx` (567 行)
+- `frontend/src/components/MediaQuality.tsx` (475 行)
+- `frontend/src/components/HomerIntegration.tsx` (409 行)
+
+### 修改文件
+
+- `backend/internal/config/config.go` — 新增 HomerConfig
+- `backend/config/config.json` — 新增 homer 配置段
+- `backend/internal/handler/handler.go` — 新增 Homer 字段和 SetHomer 方法
+- `backend/internal/router/router.go` — 新增 7 条路由
+- `backend/main.go` — Homer 客户端初始化
+- `frontend/src/App.tsx` — 路由 + 侧边栏 + 导入
+- `frontend/src/components/StatusBar.tsx` — 页面标题映射
+- `frontend/src/locales/zh.ts` / `en.ts` — signalingTrace 词条
+
+---
+
 ## 当前状态总结
 
 | 项目 | 状态 | 说明 |
 |------|------|------|
-| xCloud-CNMS 后端 | ✅ 稳定 | 18 个 handler（含 capture），3 个 WS 端点，AIOps 已接入 |
-| xCloud-CNMS 前端 | ✅ 稳定 | 26 个页面（含 PacketCapture），深色模式，i18n |
-| 文档体系 | ✅ 已建立 | 5 个文档全面更新，含抓包工具 |
+| xCloud-CNMS 后端 | ✅ 稳定 | 19 个 handler（含 signaling），3 个 WS 端点，AIOps 已接入 |
+| xCloud-CNMS 前端 | ✅ 稳定 | 27 个页面（含 SignalingTrace），深色模式，i18n |
+| 文档体系 | ✅ 已建立 | 5 个文档全面更新，含信令追踪 |
 | IMS 配置 | 🔄 调优中 | P/S/I-CSCF 已配置，持续优化 |
 | heplify | ✅ 已集成 | HEP 采集可用，未与主系统联动 |
 | 一键抓包 | ✅ 已完成 | tcpdump 管理、12 种协议预设、WebSocket 实时进度、PCAP 下载 |
+| 信令追踪 | ✅ 已完成 | 跨协议解析/关联/Ladder Diagram/Homer 集成 |

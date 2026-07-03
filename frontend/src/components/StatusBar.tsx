@@ -15,6 +15,7 @@ const PAGE_I18N: Record<string, string> = {
   '/alarms': 'nav.alarms',
   '/fault-diagnosis': 'nav.faultDiagnosis',
   '/capture': 'nav.packetCapture',
+  '/signaling': 'nav.signalingTrace',
   '/fault-resolution': 'nav.faultResolution',
   '/logs': 'nav.logCenter',
   '/backups': 'nav.configBackups',

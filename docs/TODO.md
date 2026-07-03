@@ -22,6 +22,16 @@
 
 ## P1 - 近期处理
 
+- [ ] 信令追踪模块完善
+
+  - 背景：Phase 7 已完成基础框架，部分功能需实际数据验证
+  - 待完善：
+    - OpenAPI 文档补丁（swagger.go 未更新）
+    - 前端 i18n 词条提取（当前使用内联 isZh 判断）
+    - Ladder Diagram 性能优化（>500 条消息时）
+    - Homer 实际部署联调
+  - 验证方式：用真实 IMSI 查询完整信令流程
+
 - [ ] IMS VoLTE 呼叫流程端到端验证
 
   - 背景：Kamailio + FreeSWITCH 已配置，需要完整呼叫测试

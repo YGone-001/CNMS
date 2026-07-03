@@ -330,7 +330,9 @@ export default function FaultDiagnosis() {
       },
     };
 
-    setResult(mockResults[selectedFault]);
+    if (selectedFault && selectedFault !== 'custom') {
+      setResult(mockResults[selectedFault]);
+    }
     setIsDiagnosing(false);
   }, [selectedFault]);
 

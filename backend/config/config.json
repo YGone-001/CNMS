@@ -17,5 +17,12 @@
     "username": "admin",
     "password": "admin123",
     "jwt_key": "xcloud-cnms-secret-key-change-me"
+  },
+  "homer": {
+    "enabled": false,
+    "api_url": "http://127.0.0.1:9080",
+    "username": "admin",
+    "password": "sipcapture",
+    "auth_token": ""
   }
 }

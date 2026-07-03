@@ -24,6 +24,15 @@ type NotifyConfig struct {
 	MinLevel   string `json:"min_level,omitempty"` // critical, major, minor, warning
 }
 
+// HomerConfig Homer HEP 集成配置
+type HomerConfig struct {
+	Enabled   bool   `json:"enabled,omitempty"`
+	APIURL    string `json:"api_url,omitempty"`
+	Username  string `json:"username,omitempty"`
+	Password  string `json:"password,omitempty"`
+	AuthToken string `json:"auth_token,omitempty"`
+}
+
 // AuthConfig 认证配置
 type AuthConfig struct {
 	Enabled  bool   `json:"enabled,omitempty"`
@@ -39,6 +48,7 @@ type AppConfig struct {
 	LogDir  string        `json:"log_dir"`
 	Notify  NotifyConfig  `json:"notify,omitempty"`
 	Auth    AuthConfig    `json:"auth,omitempty"`
+	Homer   HomerConfig   `json:"homer,omitempty"`
 }
 
 // Load 从指定路径加载配置文件

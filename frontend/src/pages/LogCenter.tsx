@@ -4,12 +4,6 @@ import {
   FileText,
   Search,
   Download,
-  RefreshCw,
-  Clock,
-  AlertTriangle,
-  Info,
-  CheckCircle,
-  XCircle,
   ChevronDown,
   ChevronRight,
   Terminal,
@@ -119,7 +113,7 @@ export default function LogCenter() {
         const resp = await fetch('/api/v1/alarms?active=true&page_size=50');
         const data = await resp.json();
         if (data.status === 'ok' && data.alarms) {
-          const keywords = data.alarms.flatMap((a: { source: string; message: string }) => [
+          const keywords: string[] = data.alarms.flatMap((a: { source: string; message: string }) => [
             a.source.toLowerCase(),
             ...a.message.split(/\s+/).filter((w: string) => w.length > 3).map((w: string) => w.toLowerCase()),
           ]);
@@ -226,14 +220,6 @@ export default function LogCenter() {
   }, [streamLogs, levelFilter, searchTerm]);
 
   // ---- Helpers ----
-  const getLevelIcon = (level: string) => {
-    const l = level.toLowerCase();
-    if (l.includes('error')) return <XCircle className="w-3.5 h-3.5 text-red-400" />;
-    if (l.includes('warn')) return <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />;
-    if (l.includes('debug')) return <Terminal className="w-3.5 h-3.5 text-gray-400" />;
-    return <Info className="w-3.5 h-3.5 text-blue-400" />;
-  };
-
   const getLevelColor = (level: string) => {
     const l = level.toLowerCase();
     if (l.includes('error')) return 'bg-red-500/10 text-red-400 border-red-500/20';
@@ -246,7 +232,6 @@ export default function LogCenter() {
   const highlightMessage = (msg: string) => {
     if (alarmKeywords.length === 0) return msg;
     const parts: React.ReactNode[] = [];
-    let remaining = msg;
     const regex = new RegExp(`(${alarmKeywords.filter(k => k.length > 3).join('|')})`, 'gi');
     let match;
     let lastIndex = 0;
