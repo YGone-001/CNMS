@@ -343,8 +343,8 @@ function LadderDiagramInner({
     [onMessageSelect],
   );
 
-  // Render
-  if (entities.length === 0 || messages.length === 0) {
+  // Render — 防御性检查，防止空数据导致渲染错误
+  if (!entities || entities.length === 0 || !messages || messages.length === 0) {
     return (
       <div className="flex items-center justify-center h-64 text-noc-muted text-sm">
         No messages to display

@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -184,97 +185,73 @@ func (h *Handler) HandleSignalingCreateTrace(w http.ResponseWriter, r *http.Requ
 	})
 }
 
-// runSignalingTrace 异步执行信令解析和关联
+// runSignalingTrace 异步执行信令追踪
+// 数据来源优先级：
+//  1. HEPListener — Kamailio siptrace 通过 HEPv3 推送的 SIP 消息（优先）
+//  2. Homer API — 从 Homer 查询已存储的 SIP 消息（辅助）
+//  3. TsharkQuery — 从环形缓冲区 pcap 查询所有协议（兜底）
 func (h *Handler) runSignalingTrace(traceID string, req signalingTraceRequest) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	parser := signaling.NewParser(h.Mongo.Database)
 	correlator := signaling.NewCorrelator()
-
 	var allMessages []model.SignalingMessage
 
-	// 构建过滤器
-	filters := map[string]string{
-		req.QueryType: req.QueryValue,
-	}
+	// 1. HEP 监听器 — 优先从 Kamailio siptrace 获取 SIP 消息
+	if h.HEPListener != nil && h.HEPListener.IsRunning() {
+		start, end := req.TimeRange.Start, req.TimeRange.End
+		var hepMsgs []model.SignalingMessage
 
-	// 解析各 NF 日志
-	for _, source := range req.Sources {
-		switch source {
-		case "logs":
-			// 解析 Open5GS 日志
-			open5gsLogs := []string{
-				"/var/log/open5gs/amf.log",
-				"/var/log/open5gs/mme.log",
-				"/var/log/open5gs/smf.log",
-				"/var/log/open5gs/hss.log",
-				"/var/log/open5gs/pcrf.log",
-			}
-			for _, logPath := range open5gsLogs {
-				msgs, err := parser.ParseOpen5GSLog(ctx, logPath, traceID, filters)
-				if err != nil {
-					log.Printf("runSignalingTrace %s: parse open5gs %s: %v", traceID, logPath, err)
-					continue
-				}
-				allMessages = append(allMessages, msgs...)
-			}
+		switch req.QueryType {
+		case "imsi", "supi":
+			hepMsgs = h.HEPListener.QueryByIMSI(req.QueryValue, start, end)
+		case "call_id":
+			hepMsgs = h.HEPListener.QueryByCallID(req.QueryValue)
+		default:
+			// 对于其他查询类型，获取全量后由 matchFilters 过滤
+			hepMsgs = h.HEPListener.QueryAll(start, end, 10000)
+		}
 
-			// 解析 Kamailio 日志
-			kamailioLogs := []string{
-				"/var/log/cscf/kamailio-pcscf.log",
-				"/var/log/cscf/kamailio-scscf.log",
-				"/var/log/cscf/kamailio-icscf.log",
+		if len(hepMsgs) > 0 {
+			for i := range hepMsgs {
+				hepMsgs[i].TraceID = traceID
 			}
-			for _, logPath := range kamailioLogs {
-				msgs, err := parser.ParseKamailioLog(ctx, logPath, traceID, filters)
-				if err != nil {
-					log.Printf("runSignalingTrace %s: parse kamailio %s: %v", traceID, logPath, err)
-					continue
-				}
-				allMessages = append(allMessages, msgs...)
-			}
-
-			// 解析 FreeSWITCH 日志
-			fsLogs := []string{
-				"/usr/local/freeswitch/log/freeswitch.log",
-			}
-			for _, logPath := range fsLogs {
-				msgs, err := parser.ParseFreeSWITCHLog(ctx, logPath, traceID, filters)
-				if err != nil {
-					log.Printf("runSignalingTrace %s: parse freeswitch %s: %v", traceID, logPath, err)
-					continue
-				}
-				allMessages = append(allMessages, msgs...)
-			}
-
-		case "pcap":
-			// 查找时间范围内的 pcap 文件
-			pcapFiles := h.findPcapFiles(req.TimeRange.Start, req.TimeRange.End)
-			for _, pcapPath := range pcapFiles {
-				pcapFilters := make(map[string]string)
-				for k, v := range filters {
-					pcapFilters[k] = v
-				}
-				msgs, err := parser.ParsePcap(ctx, pcapPath, traceID, pcapFilters)
-				if err != nil {
-					log.Printf("runSignalingTrace %s: parse pcap %s: %v", traceID, pcapPath, err)
-					continue
-				}
-				allMessages = append(allMessages, msgs...)
-			}
+			allMessages = append(allMessages, hepMsgs...)
+			log.Printf("runSignalingTrace %s: HEP listener returned %d SIP messages", traceID, len(hepMsgs))
+		} else {
+			log.Printf("runSignalingTrace %s: HEP listener returned 0 messages", traceID)
 		}
 	}
 
-	// Homer HEP 集成：如果启用，从 Homer 获取 SIP 消息
-	if h.Homer != nil && h.HomerCfg.Enabled {
-		log.Printf("runSignalingTrace %s: fetching SIP messages from Homer", traceID)
+	// 2. Homer API — 从 Homer 查询 SIP 消息（辅助，如有 HEP 结果则跳过）
+	if len(allMessages) == 0 && h.Homer != nil && h.HomerCfg.Enabled {
+		log.Printf("runSignalingTrace %s: no HEP data, trying Homer API", traceID)
 		homerMsgs, err := h.Homer.Search(ctx, req.QueryType, req.QueryValue, req.TimeRange.Start, req.TimeRange.End, traceID)
 		if err != nil {
 			log.Printf("runSignalingTrace %s: homer search failed: %v", traceID, err)
 		} else if len(homerMsgs) > 0 {
 			log.Printf("runSignalingTrace %s: got %d messages from Homer", traceID, len(homerMsgs))
 			allMessages = append(allMessages, homerMsgs...)
+		}
+	}
+
+	// 3. TsharkQuery — 从 pcap 环形缓冲区查询所有协议（兜底）
+	if h.TsharkQ != nil {
+		tqTimeRange := model.TimeRange{
+			Start: req.TimeRange.Start,
+			End:   req.TimeRange.End,
+		}
+		msgs, err := h.TsharkQ.Query(req.QueryType, req.QueryValue, tqTimeRange)
+		if err != nil {
+			log.Printf("runSignalingTrace %s: tshark query: %v", traceID, err)
+		} else if len(msgs) > 0 {
+			for i := range msgs {
+				msgs[i].TraceID = traceID
+			}
+			allMessages = append(allMessages, msgs...)
+			log.Printf("runSignalingTrace %s: tshark query returned %d messages", traceID, len(msgs))
+		} else {
+			log.Printf("runSignalingTrace %s: tshark query returned 0 messages", traceID)
 		}
 	}
 
@@ -327,34 +304,6 @@ func (h *Handler) runSignalingTrace(traceID string, req signalingTraceRequest) {
 	)
 
 	log.Printf("runSignalingTrace %s: completed, %d messages, %d entities", traceID, len(allMessages), len(entities))
-}
-
-// findPcapFiles 查找时间范围内的 pcap 文件
-func (h *Handler) findPcapFiles(start, end time.Time) []string {
-	// 默认 pcap 存储目录
-	captureDir := "/tmp/xcloud-captures"
-	var files []string
-
-	entries, err := os.ReadDir(captureDir)
-	if err != nil {
-		return files
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".pcap") {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-		// 文件修改时间在范围内
-		if info.ModTime().After(start) && info.ModTime().Before(end) {
-			files = append(files, captureDir+"/"+entry.Name())
-		}
-	}
-
-	return files
 }
 
 // -----------------------------------------------------------
@@ -687,6 +636,93 @@ func (h *Handler) HandleSignalingHomerStatus(w http.ResponseWriter, r *http.Requ
 		"healthy": true,
 		"version": health.Version,
 		"api_url": h.HomerCfg.APIURL,
+	})
+}
+
+// -----------------------------------------------------------
+// GET /api/v1/signaling/capture/status — 信令抓包守护进程状态
+// -----------------------------------------------------------
+
+// HandleSignalingCaptureStatus 返回信令持续抓包守护进程的运行状态
+func (h *Handler) HandleSignalingCaptureStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, signalingResponse{Status: "error", Message: "method not allowed"})
+		return
+	}
+
+	if h.CapDaemon == nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":  "ok",
+			"enabled": false,
+			"message": "signaling capture daemon is not configured",
+		})
+		return
+	}
+
+	status := h.CapDaemon.Status()
+
+	// 列出环形缓冲区文件详情（文件名、大小、修改时间）
+	var ringFiles []map[string]any
+	if files, err := h.CapDaemon.ListRingFiles(); err == nil {
+		for _, f := range files {
+			info, err := os.Stat(f)
+			if err != nil {
+				continue
+			}
+			ringFiles = append(ringFiles, map[string]any{
+				"name":    filepath.Base(f),
+				"size":    info.Size(),
+				"mod_time": info.ModTime().Format(time.RFC3339),
+			})
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":     "ok",
+		"enabled":    true,
+		"running":    status.Running,
+		"pid":        status.PID,
+		"files_count": status.FilesCount,
+		"disk_bytes": status.DiskBytes,
+		"ring_dir":   status.RingDir,
+		"interface":  status.Interface,
+		"bpf_filter": status.BPFFilter,
+		"start_time": status.StartTime,
+		"ring_files": ringFiles,
+	})
+}
+
+// -----------------------------------------------------------
+// GET /api/v1/signaling/hep/status — HEP 监听器状态
+// -----------------------------------------------------------
+
+// HandleSignalingHEPStatus 返回 HEP 监听器的运行状态
+func (h *Handler) HandleSignalingHEPStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, signalingResponse{Status: "error", Message: "method not allowed"})
+		return
+	}
+
+	if h.HEPListener == nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":  "ok",
+			"enabled": false,
+			"message": "HEP listener is not configured",
+		})
+		return
+	}
+
+	status := h.HEPListener.Status()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":        "ok",
+		"enabled":       true,
+		"running":       status.Running,
+		"listen_addr":   status.ListenAddr,
+		"received":      status.Received,
+		"parsed":        status.Parsed,
+		"errors":        status.Errors,
+		"buffer_count":  status.BufferCount,
+		"last_receive":  status.LastReceive,
 	})
 }
 

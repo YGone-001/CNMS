@@ -146,9 +146,12 @@ backend/
     │   ├── rca.go                  # 根因分析（告警触发）
     │   └── trend.go                # 趋势分析
     ├── signaling/
-    │   ├── parser.go               # 信令日志解析（Open5GS/Kamailio/FreeSWITCH/tshark）
+    │   ├── parser.go               # 信令工具函数（matchFilters/normalizeSIPURI）
     │   ├── correlator.go           # 跨协议关联引擎（Union-Find）
-    │   └── hep.go                  # Homer HEP 客户端
+    │   ├── hep.go                  # Homer API 客户端
+    │   ├── capture_daemon.go       # tshark 持续抓包守护进程（环形缓冲区）
+    │   ├── tshark_query.go         # pcap 查询引擎（tshark 显示过滤 + 流式解析）
+    │   └── hep_listener.go         # HEP 监听器（UDP 9060，HEPv3 解析，SIP 提取）
     └── ws/
         ├── handler.go              # 监控 WebSocket（进程状态 + 告警生成）
         ├── logstream.go            # 日志流 WebSocket（动态过滤）
@@ -191,18 +194,27 @@ backend/
 
 #### 6. 信令追踪模块 (signaling)
 
-- **parser**: 多源日志解析器
-  - Open5GS 日志：NAS/NGAP/S1AP/GTPv2C/PFCP/Diameter，提取 IMSI/SUPI/TEID
-  - Kamailio syslog：SIP 方法/状态码/Call-ID + Diameter Cx (UAR/MAA/SAR)
-  - FreeSWITCH 日志：SDP/RTP 统计/编解码器/呼叫事件
-  - tshark pcap：全协议解析（SIP/Diameter/GTPv2C/PFCP/S1AP/NGAP/NAS）
+**数据源（三级优先）：**
+- **hep_listener**: UDP 9060 监听 Kamailio siptrace HEPv3 数据（优先，性能最好）
+- **hep**: Homer API 客户端，查询已存储的 SIP 消息（辅助）
+- **tshark_query**: 从 tshark 环形缓冲区 pcap 按条件查询全协议（兜底）
+- **capture_daemon**: tshark 持续抓包守护进程，环形缓冲区 20×100MB
+
+**关联引擎：**
 - **correlator**: Union-Find 跨协议关联引擎
   - 10 维标识关联（IMSI/SUPI/MSISDN/SIP URI/TEID/UE IP/Call-ID 等）
   - 网元排序（按 3GPP 架构顺序：UE→gNB→AMF→HSS→SGW→PGW→P-CSCF→S-CSCF）
   - 摘要生成（注册/鉴权/会话/IMS 注册/通话/短信各环节成功/失败判断）
-- **hep**: Homer HEP 集成客户端
-  - 认证、搜索、Call Flow 获取、格式转换
-  - 支持按 Call-ID/SIP URI/自定义标识搜索
+
+**信令数据来源:**
+
+| 优先级 | 来源 | 说明 | 协议覆盖 |
+|--------|------|------|----------|
+| 1 | HEPListener | Kamailio siptrace → :9060/udp → HEPv3 解析 | SIP |
+| 2 | Homer API | 查询 Homer 已存储数据 | SIP |
+| 3 | TsharkQuery | 环形缓冲区 pcap → editcap + mergecap + tshark | S1AP/NGAP/SIP/Diameter/GTPv2C/PFCP/NAS/SGsAP |
+
+**处理流程:** 创建 Trace → HEPListener 查询 SIP → Homer API 查询 → TsharkQuery pcap 查询 → Union-Find 跨协议关联 → 摘要生成 → 批量写入 MongoDB
 
 #### 7. WebSocket 模块
 
@@ -253,7 +265,8 @@ frontend/
     │   ├── ProcessTable.tsx        # 进程表格
     │   ├── ResourceChart.tsx       # 资源图表
     │   ├── SummaryCard.tsx         # 汇总卡片
-    │   └── MarkdownViewer.tsx      # Markdown 查看器（深色模式适配）
+    │   ├── MarkdownViewer.tsx      # Markdown 查看器（深色模式适配）
+    │   └── LadderDiagram.tsx       # 信令梯形时序图（SVG，协议着色，错误标记）
     ├── context/                    # React Context
     │   ├── MonitorContext.tsx      # 监控上下文
     │   ├── ThemeContext.tsx        # 主题上下文（深色/浅色）
@@ -287,7 +300,9 @@ frontend/
     │   ├── AuditLogs.tsx           # 审计日志
     │   ├── UserManagement.tsx      # 用户管理（RBAC）
     │   ├── Alarms.tsx              # 告警（旧版，AlarmCenter 已替代）
-    │   └── AIOps.tsx               # AIOps 汇总（未挂路由）
+    │   ├── AIOps.tsx               # AIOps 汇总（未挂路由）
+    │   ├── PacketCapture.tsx       # 一键抓包（协议预设、实时进度、PCAP 下载）
+    │   └── SignalingTrace.tsx      # 信令追踪（跨协议关联、Ladder Diagram、Homer 集成）
     ├── types/                      # TypeScript 类型
     │   └── monitor.ts              # 监控类型定义
     └── utils/                      # 工具函数

@@ -41,6 +41,23 @@ type AuthConfig struct {
 	JWTKey   string `json:"jwt_key,omitempty"`
 }
 
+// SignalingCaptureConfig 信令持续抓包配置
+type SignalingCaptureConfig struct {
+	Enabled        bool   `json:"enabled"`
+	Interface      string `json:"interface"`          // 网卡名，默认 "any"
+	RingDir        string `json:"ring_dir"`           // pcap 存储目录，默认 "/var/spool/xcloud/signaling"
+	RingFileSizeMB int    `json:"ring_file_size_mb"`  // 每个文件大小 (MB)，默认 100
+	RingFileCount  int    `json:"ring_file_count"`    // 环形文件数量，默认 20
+	BPFFilter      string `json:"bpf_filter"`         // BPF 过滤表达式
+}
+
+// HEPListenerConfig HEP 监听器配置（接收 Kamailio siptrace HEP 数据）
+type HEPListenerConfig struct {
+	Enabled    bool   `json:"enabled"`
+	ListenAddr string `json:"listen_addr"` // 默认 ":9060"
+	BufferSize int    `json:"buffer_size"` // 环形缓冲区大小，默认 50000
+}
+
 // AppConfig 应用全局配置
 type AppConfig struct {
 	Server  ServerConfig  `json:"server"`
@@ -49,6 +66,8 @@ type AppConfig struct {
 	Notify  NotifyConfig  `json:"notify,omitempty"`
 	Auth    AuthConfig    `json:"auth,omitempty"`
 	Homer   HomerConfig   `json:"homer,omitempty"`
+	SignalingCapture SignalingCaptureConfig `json:"signaling_capture,omitempty"`
+	HEPListener HEPListenerConfig `json:"hep_listener,omitempty"`
 }
 
 // Load 从指定路径加载配置文件

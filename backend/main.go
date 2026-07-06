@@ -17,6 +17,7 @@ import (
 	"xcloud-cnms/internal/mongo"
 	"xcloud-cnms/internal/router"
 	"xcloud-cnms/internal/scheduler"
+	"xcloud-cnms/internal/signaling"
 	"xcloud-cnms/internal/ws"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -128,6 +129,48 @@ func main() {
 	nfDiscovery := monitor.NewNFDiscoveryWithDB("http://localhost:8080", mc)
 	dh := handler.NewDiscoveryHandler(nfDiscovery)
 	nfDiscovery.StartPeriodicDiscovery(ctx)
+
+	// 信令持续抓包守护进程（需要 root 权限或 CAP_NET_RAW）
+	var captureDaemon *signaling.CaptureDaemon
+	var tsharkQuery *signaling.TsharkQuery
+	if cfg.SignalingCapture.Enabled {
+		captureDaemon = signaling.NewCaptureDaemon(signaling.CaptureDaemonConfig{
+			Enabled:        cfg.SignalingCapture.Enabled,
+			Interface:      cfg.SignalingCapture.Interface,
+			RingDir:        cfg.SignalingCapture.RingDir,
+			RingFileSizeMB: cfg.SignalingCapture.RingFileSizeMB,
+			RingFileCount:  cfg.SignalingCapture.RingFileCount,
+			BPFFilter:      cfg.SignalingCapture.BPFFilter,
+		})
+		if err := captureDaemon.Start(); err != nil {
+			log.Printf("warning: signaling capture daemon start failed: %v", err)
+		} else {
+			defer captureDaemon.Stop()
+		}
+
+		// 创建环形缓冲区查询引擎（使用相同 ring_dir）
+		tsharkQuery = signaling.NewTsharkQuery(cfg.SignalingCapture.RingDir)
+		log.Printf("signaling capture enabled: ring_dir=%s, interface=%s",
+			cfg.SignalingCapture.RingDir, cfg.SignalingCapture.Interface)
+	}
+
+	// 注入抓包组件到 handler
+	h.SetSignalingCapture(captureDaemon, tsharkQuery)
+
+	// HEP 监听器（接收 Kamailio siptrace HEPv3 数据）
+	if cfg.HEPListener.Enabled {
+		hepListener := signaling.NewHEPListener(signaling.HEPListenerConfig{
+			Enabled:    cfg.HEPListener.Enabled,
+			ListenAddr: cfg.HEPListener.ListenAddr,
+			BufferSize: cfg.HEPListener.BufferSize,
+		})
+		if err := hepListener.Start(); err != nil {
+			log.Printf("warning: HEP listener start failed: %v", err)
+		} else {
+			h.HEPListener = hepListener
+			defer hepListener.Stop()
+		}
+	}
 
 	// 配置热加载
 	watcher := config.NewWatcher(*configPath, cfg, func(newCfg *config.AppConfig) {

@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, Component } from 'react';
+import type { ErrorInfo, ReactNode } from 'react';
 import {
   GitBranch,
   Play,
@@ -11,6 +12,7 @@ import {
   Clock,
   Search,
   Filter,
+  AlertTriangle,
 } from 'lucide-react';
 import { useI18n } from '@/i18nContext';
 import { authFetch } from '@/App';
@@ -33,6 +35,58 @@ import {
   SCENARIO_OPTIONS,
   SUMMARY_STEPS,
 } from '@/types/signaling';
+
+// ---------------------------------------------------------------------------
+// Error Boundary — 防止渲染错误导致整个页面白屏
+// ---------------------------------------------------------------------------
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class SignalingErrorBoundary extends Component<
+  { children: ReactNode; isZh: boolean },
+  ErrorBoundaryState
+> {
+  state: ErrorBoundaryState = { hasError: false, error: null };
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('[SignalingTrace] Render error:', error, info.componentStack);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      const { isZh } = this.props;
+      return (
+        <div className="flex flex-col items-center justify-center py-20 text-center">
+          <AlertTriangle className="w-12 h-12 text-red-400 mb-4" />
+          <h2 className="text-lg font-semibold text-noc-text mb-2">
+            {isZh ? '页面渲染出错' : 'Page Render Error'}
+          </h2>
+          <p className="text-sm text-noc-muted mb-4 max-w-md">
+            {this.state.error?.message || 'Unknown error'}
+          </p>
+          <button
+            onClick={() => {
+              this.setState({ hasError: false, error: null });
+              window.location.hash = '#/';
+              setTimeout(() => window.location.hash = '#/signaling', 100);
+            }}
+            className="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-md text-sm"
+          >
+            {isZh ? '重新加载' : 'Reload Page'}
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -74,6 +128,7 @@ function relativeTime(ts: string): string {
 }
 
 function scenarioLabel(scenario: string, lang: string): string {
+  if (!scenario) return '-';
   const opt = SCENARIO_OPTIONS.find((s) => s.value === scenario);
   if (!opt) return scenario;
   return lang === 'zh' ? opt.label_zh : opt.label_en;
@@ -96,7 +151,7 @@ function statusIcon(status: TraceStatus) {
 // Component
 // ---------------------------------------------------------------------------
 
-export default function SignalingTrace() {
+function SignalingTrace() {
   const { language } = useI18n();
   const isZh = language === 'zh';
 
@@ -161,13 +216,17 @@ export default function SignalingTrace() {
       params.set('page', String(tracesPage));
       params.set('page_size', '20');
       const resp = await authFetch(`/api/v1/signaling/traces?${params}`);
+      if (!resp.ok) {
+        console.warn('[SignalingTrace] fetchTraces non-OK:', resp.status);
+        return;
+      }
       const data = await resp.json();
       if (data.status === 'ok') {
-        setTraces(data.traces || []);
+        setTraces(Array.isArray(data.traces) ? data.traces : []);
         setTracesTotal(data.total || 0);
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      console.error('[SignalingTrace] fetchTraces error:', err);
     } finally {
       setTracesLoading(false);
     }
@@ -180,9 +239,17 @@ export default function SignalingTrace() {
     async (traceId: string) => {
       try {
         const resp = await authFetch(`/api/v1/signaling/trace/${traceId}`);
+        if (!resp.ok) {
+          console.warn('[SignalingTrace] fetchTraceStatus non-OK:', resp.status);
+          return;
+        }
         const data = await resp.json();
         if (data.status === 'ok' && data.data) {
           const trace = data.data as SignalingTraceType;
+          // 确保关键字段有默认值，防止渲染时 undefined 崩溃
+          trace.entities = trace.entities || [];
+          trace.summary = trace.summary || {} as typeof trace.summary;
+          trace.message_count = trace.message_count || 0;
           setActiveTrace(trace);
           if (trace.status === 'running') {
             // continue polling
@@ -203,8 +270,8 @@ export default function SignalingTrace() {
             fetchMessages(traceId);
           }
         }
-      } catch {
-        // ignore
+      } catch (err) {
+        console.error('[SignalingTrace] fetchTraceStatus error:', err);
       }
     },
     [fetchTraces, showToast, isZh],
@@ -224,13 +291,28 @@ export default function SignalingTrace() {
           params.set('protocol', protocol);
         }
         const resp = await authFetch(`/api/v1/signaling/trace/${traceId}/messages?${params}`);
+        if (!resp.ok) {
+          console.warn('[SignalingTrace] fetchMessages non-OK:', resp.status);
+          setMessages([]);
+          return;
+        }
         const data = await resp.json();
         if (data.status === 'ok') {
-          setMessages(data.messages || []);
+          const msgs = (data.messages || []).map((m: SignalingMessage) => ({
+            ...m,
+            identifiers: m.identifiers || {},
+            src_entity: m.src_entity || '',
+            dst_entity: m.dst_entity || '',
+            protocol: m.protocol || 'UNKNOWN',
+            method: m.method || '',
+            direction: m.direction || 'indication',
+          }));
+          setMessages(msgs);
           setMsgTotal(data.total || 0);
           setMsgPage(page);
         }
-      } catch {
+      } catch (err) {
+        console.error('[SignalingTrace] fetchMessages error:', err);
         setMessages([]);
       } finally {
         setMessagesLoading(false);
@@ -266,17 +348,26 @@ export default function SignalingTrace() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
+
+      if (!resp.ok) {
+        const errText = await resp.text().catch(() => '');
+        console.error('[SignalingTrace] create trace failed:', resp.status, errText);
+        showToast(`Create failed (${resp.status})`, 'error');
+        return;
+      }
+
       const data = await resp.json();
 
       if (data.status === 'ok' && data.data?.trace_id) {
         showToast(isZh ? '追踪任务已创建' : 'Trace task created', 'success');
-        fetchTraces();
-        // Start polling
+        // 先刷新历史列表，再开始轮询状态
+        fetchTraces().catch(() => {});
         fetchTraceStatus(data.data.trace_id);
       } else {
         showToast(data.message || 'Failed to create trace', 'error');
       }
-    } catch {
+    } catch (err) {
+      console.error('[SignalingTrace] handleCreateTrace error:', err);
       showToast(isZh ? '请求失败' : 'Request failed', 'error');
     } finally {
       setCreating(false);
@@ -310,6 +401,10 @@ export default function SignalingTrace() {
   // ---------------------------------------------------------------------------
   const handleSelectTrace = (trace: SignalingTraceType) => {
     if (pollTimer.current) clearTimeout(pollTimer.current);
+    // 确保关键字段有默认值
+    trace.entities = trace.entities || [];
+    trace.summary = trace.summary || {} as typeof trace.summary;
+    trace.message_count = trace.message_count || 0;
     setActiveTrace(trace);
     setSelectedMsg(null);
     if (trace.status === 'completed') {
@@ -357,9 +452,14 @@ export default function SignalingTrace() {
   // Unique protocols in current messages
   const protocolsInMessages = Array.from(new Set((messages || []).map((m) => m.protocol)));
 
-  // Safe accessors for activeTrace
-  const traceEntities = activeTrace?.entities || [];
+  // Safe accessors for activeTrace — 确保字段不为 undefined/null，防止渲染崩溃
+  const traceEntities: string[] = activeTrace?.entities || [];
   const traceSummary = activeTrace?.summary || null;
+  const traceQueryType = activeTrace?.query_type || '';
+  const traceQueryValue = activeTrace?.query_value || '';
+  const traceScenario = activeTrace?.scenario || 'all';
+  const traceStatus = activeTrace?.status || 'running';
+  const traceCreatedAt = activeTrace?.created_at || '';
 
   // Current query type option
   const currentQueryOption = QUERY_TYPE_OPTIONS.find((o) => o.value === queryType);
@@ -559,16 +659,16 @@ export default function SignalingTrace() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-mono text-noc-text truncate">
-                            {trace.query_type.toUpperCase()}: {trace.query_value}
+                            {(trace.query_type || '').toUpperCase()}: {trace.query_value || ''}
                           </span>
                           <span className="text-xs px-1.5 py-0.5 rounded bg-noc-bg-50 text-noc-muted">
                             {scenarioLabel(trace.scenario, language)}
                           </span>
                         </div>
                         <div className="flex items-center gap-3 mt-0.5 text-xs text-noc-muted">
-                          <span>{trace.message_count} {isZh ? '条消息' : 'msgs'}</span>
+                          <span>{trace.message_count || 0} {isZh ? '条消息' : 'msgs'}</span>
                           <span>{relativeTime(trace.created_at)}</span>
-                          {trace.entities.length > 0 && (
+                          {trace.entities && trace.entities.length > 0 && (
                             <span className="truncate">
                               {trace.entities.slice(0, 5).join(' → ')}
                               {trace.entities.length > 5 && ' ...'}
@@ -603,14 +703,14 @@ export default function SignalingTrace() {
           <div className="px-4 py-3 border-b border-noc-border">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
-                {statusIcon(activeTrace.status)}
+                {statusIcon(traceStatus as TraceStatus)}
                 <span className="text-sm font-medium text-noc-text">
-                  {activeTrace.query_type.toUpperCase()}: {activeTrace.query_value}
+                  {traceQueryType.toUpperCase()}: {traceQueryValue}
                 </span>
                 <span className="text-xs px-2 py-0.5 rounded-full bg-noc-bg-50 text-noc-muted">
-                  {scenarioLabel(activeTrace.scenario, language)}
+                  {scenarioLabel(traceScenario, language)}
                 </span>
-                {activeTrace.status === 'running' && (
+                {traceStatus === 'running' && (
                   <span className="text-xs text-blue-400 flex items-center gap-1">
                     <Loader2 className="w-3 h-3 animate-spin" />
                     {isZh ? '解析中...' : 'Parsing...'}
@@ -618,12 +718,12 @@ export default function SignalingTrace() {
                 )}
               </div>
               <span className="text-xs text-noc-muted">
-                {formatTime(activeTrace.created_at)}
+                {formatTime(traceCreatedAt)}
               </span>
             </div>
 
             {/* Summary cards */}
-            {activeTrace.status === 'completed' && traceSummary && (
+            {traceStatus === 'completed' && traceSummary && (
               <div className="flex flex-wrap gap-2">
                 {SUMMARY_STEPS.map((step) => {
                   const ok = traceSummary[step.key];
@@ -998,7 +1098,7 @@ export default function SignalingTrace() {
                 )}
               </div>
               {/* Identifiers */}
-              {Object.entries(selectedMsg.identifiers).some(([, v]) => v) && (
+              {selectedMsg.identifiers && Object.entries(selectedMsg.identifiers).some(([, v]) => v) && (
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {Object.entries(selectedMsg.identifiers)
                     .filter(([, v]) => v)
@@ -1028,5 +1128,15 @@ export default function SignalingTrace() {
         </div>
       )}
     </div>
+  );
+}
+
+// 用 ErrorBoundary 包裹导出，防止渲染错误导致白屏
+export default function SignalingTraceWithErrorBoundary() {
+  const { language } = useI18n();
+  return (
+    <SignalingErrorBoundary isZh={language === 'zh'}>
+      <SignalingTrace />
+    </SignalingErrorBoundary>
   );
 }

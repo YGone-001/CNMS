@@ -1195,6 +1195,16 @@ GET /api/v1/capture/presets
 
 ### 信令追踪
 
+信令追踪模块提供跨协议信令关联分析能力。创建追踪后，后台异步从多个日志源采集数据，解析提取消息，通过 Union-Find 引擎关联，最终生成梯形时序图和成功/失败摘要。
+
+#### 数据来源（优先级）
+
+| 优先级 | 来源 | 说明 | IMSI 提取方式 |
+|--------|------|------|--------------|
+| 1 | HEPListener | Kamailio siptrace 通过 HEPv3 推送到 :9060/udp | SIP URI 中的 IMSI |
+| 2 | Homer API | 从 Homer 查询已存储的 SIP 消息 | SIP 消息中的 IMSI |
+| 3 | TsharkQuery | 从 tshark 环形缓冲区 pcap 查询全协议 | `gtpv2.imsi`/`e212.imsi` + SIP URI |
+
 #### 创建追踪任务
 
 ```http
@@ -1234,7 +1244,7 @@ POST /api/v1/signaling/trace
 }
 ```
 
-**说明:** 创建后立即返回 trace_id，后台异步执行解析/关联/存储。前端轮询查询状态。
+**说明:** 创建后立即返回 trace_id，后台异步执行解析/关联/存储。前端轮询查询状态。超时时间 5 分钟。
 
 #### 查询追踪状态
 
@@ -1262,7 +1272,9 @@ GET /api/v1/signaling/trace/{traceId}
       "session_ok": true,
       "ims_reg_ok": false,
       "call_ok": false,
-      "sms_ok": false
+      "sms_ok": false,
+      "error_step": "",
+      "error_detail": ""
     },
     "created_at": "...",
     "created_by": "admin"
@@ -1275,6 +1287,19 @@ GET /api/v1/signaling/trace/{traceId}
 | `running` | 解析中，继续轮询 |
 | `completed` | 完成，可加载消息 |
 | `error` | 失败 |
+
+**摘要字段说明:**
+
+| 字段 | 说明 |
+|------|------|
+| `reg_ok` | 注册/附着是否成功（NAS Registration Accept / Attach Accept） |
+| `auth_ok` | 鉴权是否成功（Authentication Response / Security Mode Complete） |
+| `session_ok` | 会话建立是否成功（Create Session Response / PDU Session Accept） |
+| `ims_reg_ok` | IMS 注册是否成功（SIP REGISTER → 200 OK） |
+| `call_ok` | VoLTE 呼叫是否成功（SIP INVITE → 200 OK，无 CANCEL/4xx/5xx） |
+| `sms_ok` | 短信是否成功（SIP MESSAGE → 200 OK） |
+| `error_step` | 失败环节（reg_ok/auth_ok/session_ok/ims_reg_ok/call_ok/sms_ok 为 false 时填充） |
+| `error_detail` | 失败详情 |
 
 #### 查询关联消息
 
@@ -1390,6 +1415,44 @@ GET /api/v1/signaling/homer/status
   "healthy": true,
   "version": "7.x",
   "api_url": "http://127.0.0.1:9080"
+}
+```
+
+#### 信令追踪处理流程
+
+```
+用户输入 IMSI → POST /signaling/trace → 创建 trace (status=running)
+    ↓ 异步 goroutine (5 分钟超时)
+    ├─ [优先] HEPListener.QueryByIMSI() — 从 HEP 缓冲区查询 SIP 消息
+    ├─ [辅助] h.Homer.Search() — 从 Homer API 查询（HEP 无数据时）
+    └─ [兜底] TsharkQuery.Query() — 从环形缓冲区 pcap 查询全协议
+        ├─ editcap 时间裁剪 → mergecap 合并
+        ├─ tshark -Y 显示过滤（IMSI 匹配）
+        └─ 无结果时回退全量查询（S1AP/SIP/Diameter 不携带 IMSI）
+    ↓ Union-Find 跨协议关联 (10 维标识)
+    ↓ 摘要生成 (6 项成功/失败判定)
+    ↓ 批量写入 signaling_messages + 更新 trace (status=completed)
+```
+
+#### HEP 监听器状态
+
+```http
+GET /api/v1/signaling/hep/status
+```
+
+**响应:**
+
+```json
+{
+  "status": "ok",
+  "enabled": true,
+  "running": true,
+  "listen_addr": ":9060",
+  "received": 12345,
+  "parsed": 12000,
+  "errors": 345,
+  "buffer_count": 8000,
+  "last_receive": "2026-07-06T18:00:00+08:00"
 }
 ```
 

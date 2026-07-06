@@ -22,15 +22,22 @@
 
 ## P1 - 近期处理
 
-- [ ] 信令追踪模块完善
+- [x] 信令追踪模块完善
 
-  - 背景：Phase 7 已完成基础框架，部分功能需实际数据验证
+  - Phase 7-9 已完成，架构重构为 tshark 持续抓包 + HEP 监听
+  - 已完成：
+    - ✅ 白屏修复（ErrorBoundary + 空值安全）
+    - ✅ 移除日志扫描，改为底层真实信令捕获
+    - ✅ CaptureDaemon tshark 环形缓冲区持续抓包
+    - ✅ TsharkQuery 从 pcap 按 IMSI/SIP/TEID 等条件查询
+    - ✅ HEPListener UDP 9060 监听 Kamailio siptrace
+    - ✅ 三级数据源优先级：HEP → Homer → tshark
+    - ✅ 已验证：4875 条消息，9 个网元（UE/eNB/MME/HSS/SGW/SMF/UPF/P-CSCF/S-CSCF）
   - 待完善：
     - OpenAPI 文档补丁（swagger.go 未更新）
-    - 前端 i18n 词条提取（当前使用内联 isZh 判断）
+    - 前端 i18n 词条提取
     - Ladder Diagram 性能优化（>500 条消息时）
-    - Homer 实际部署联调
-  - 验证方式：用真实 IMSI 查询完整信令流程
+    - 前端抓包状态展示页面
 
 - [ ] IMS VoLTE 呼叫流程端到端验证
 
@@ -38,11 +45,11 @@
   - 影响范围：P-CSCF、S-CSCF、FreeSWITCH 配置
   - 验证方式：UE 注册成功，VoLTE 呼叫建立，RTP 媒体流正常
 
-- [ ] heplify 集成到监控流程
+- [ ] 信令追踪 OpenAPI 文档更新
 
-  - 背景：heplify 已部署但未与 xCloud-CNMS 联动
-  - 影响范围：heplify 配置、xCloud-CNMS 日志分析模块
-  - 验证方式：HEP 数据能被采集并在 xCloud-CNMS 中展示
+  - 背景：swagger.go 未更新信令追踪 API 定义
+  - 影响范围：API 文档页面
+  - 验证方式：/docs 页面显示信令追踪 API 定义
 
 - [ ] 自定义告警规则引擎
 
@@ -136,3 +143,11 @@
 - [x] 深色模式 Markdown 代码块适配
 - [x] 一键抓包功能（后端 6 API + 前端页面 + 12 种协议预设 + WebSocket 实时进度）
 - [x] auth.enabled=false 时 RequireRole 放行修复（解决 "no claims in context" 报错）
+- [x] 信令追踪白屏修复（ErrorBoundary + 空值安全）
+- [x] 信令追踪日志解析修复（Open5GS/Kamailio 路径、正则、IMSI 提取）
+- [x] 信令架构重构：移除日志扫描，改为 tshark 持续抓包 + HEP 监听（Phase 9）
+- [x] CaptureDaemon tshark 环形缓冲区持续抓包（20×100MB，BPF 信令过滤）
+- [x] TsharkQuery pcap 查询引擎（editcap 时间裁剪 + mergecap 合并 + 显示过滤）
+- [x] HEPListener UDP 9060 监听 Kamailio siptrace（HEPv3 解析，50000 条缓冲区）
+- [x] IMSI 正则修复（支持 Open5GS MME 格式 `IMSI:[xxx]`）
+- [x] editcap 时间过滤 UTC bug 修复（改为本地时间）

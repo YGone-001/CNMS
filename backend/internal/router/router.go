@@ -302,6 +302,10 @@ func New(h *handler.Handler, wh *ws.WSHandler, lsh *ws.LogStreamHandler, dh *han
 			h.HandleSignalingListTraces(w, r)
 		case r.URL.Path == "/api/v1/signaling/homer/status" && r.Method == http.MethodGet:
 			h.HandleSignalingHomerStatus(w, r)
+		case r.URL.Path == "/api/v1/signaling/capture/status" && r.Method == http.MethodGet:
+			h.HandleSignalingCaptureStatus(w, r)
+		case r.URL.Path == "/api/v1/signaling/hep/status" && r.Method == http.MethodGet:
+			h.HandleSignalingHEPStatus(w, r)
 		case strings.HasPrefix(r.URL.Path, "/api/v1/signaling/trace/") && r.Method == http.MethodGet:
 			if strings.HasSuffix(r.URL.Path, "/messages") {
 				h.HandleSignalingGetMessages(w, r)

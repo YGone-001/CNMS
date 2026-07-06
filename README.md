@@ -73,13 +73,15 @@ xCloud-CNMS 是一个专业的 4G/5G/IMS 核心网监控管理平台，面向电
 - 并发限制（最多 5 个）、资源上限（时长/文件大小）
 
 ### 🔍 信令追踪
-- 跨协议信令追踪（15 种协议：NAS/NGAP/S1AP/SIP/Diameter/GTPv2C/PFCP/RTP 等）
-- 多源日志解析（Open5GS/Kamailio/FreeSWITCH 日志 + tshark pcap）
-- Union-Find 跨协议关联引擎（10 维标识关联：IMSI/SUPI/MSISDN/TEID/UE IP 等）
+- 三级数据源：HEPListener（Kamailio HEP 推送）→ Homer API → tshark pcap 环形缓冲区
+- 信令持续抓包（tshark 环形缓冲区 20×100MB，BPF 信令协议过滤，崩溃自动重启）
+- HEP 监听器（UDP 9060 接收 Kamailio siptrace，HEPv3 解析，50000 条环形缓冲区）
+- 跨协议关联引擎（Union-Find 10 维标识：IMSI/SUPI/MSISDN/TEID/UE IP 等）
 - Ladder Diagram 梯形时序图（纯 SVG，虚拟滚动，协议着色，错误标记）
 - 消息详情面板（按协议类型展示不同字段，SDP 解析，原始数据预览）
 - 媒体质量展示（MOS 仪表盘、丢包/抖动/RTD 指标、rtpengine 中继映射）
-- Homer HEP 集成（iframe 嵌入 + API 模式双模式）
+- 成功/失败摘要（注册/鉴权/会话/IMS注册/通话/短信 6 项判定 + 失败环节定位）
+- 已验证：4875 条消息，9 个网元（UE/eNB/MME/HSS/SGW/SMF/UPF/P-CSCF/S-CSCF）
 
 ### 📝 日志中心
 - 多目录日志文件、日期滚动
@@ -211,6 +213,7 @@ MML（Man-Machine Language）模拟电信设备人机命令交互：
 | 部署 | `/api/v1/deployment/*` `/api/v1/deployment/ws` | 模板 + 状态 WebSocket |
 | 发现 | `/api/v1/nf/discovery` `/api/v1/nf/discovered` | NF 自动发现 |
 | 抓包 | `/api/v1/capture/start` `/api/v1/capture/stop` `/api/v1/capture/sessions` `/api/v1/capture/download` `/api/v1/capture/presets` | 一键抓包生命周期 |
+| 信令追踪 | `/api/v1/signaling/trace` `/api/v1/signaling/traces` `/api/v1/signaling/homer/status` | 跨协议信令关联追踪（13 个端点） |
 
 完整 API 文档请访问 Web UI 中的 `/docs` 页面，或参阅 [API 文档](docs/api.md)。
 
@@ -223,6 +226,7 @@ MML（Man-Machine Language）模拟电信设备人机命令交互：
 | `/api/v1/monitor/ws` | NF 进程状态、告警生成、指标持久化、抓包进度 | 2s / 30s |
 | `/api/v1/nf/logs/ws` | 实时日志流（动态过滤） | 500ms |
 | `/api/v1/deployment/ws` | 部署状态 + EPC/IMS 用户数 | 5s / 10s |
+| `/api/v1/signaling/trace/{id}/ws` | 信令追踪实时进度（阶段/进度/消息数/预览） | 500ms |
 
 ---
 

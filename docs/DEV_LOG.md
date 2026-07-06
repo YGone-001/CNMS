@@ -273,14 +273,105 @@ P-CSCF 已有多个备份版本：
 
 ---
 
+## 阶段八：SignalingTrace 白屏修复 + 日志解析修复 (2026-07-03 ~ 07-06)
+
+**状态**: ✅ 已完成
+
+### 问题一：点击 Start Trace 后白屏
+
+**直接原因**：追踪历史列表渲染时，`trace.entities` 为 `null`（MongoDB 返回空数组时可能序列化为 null），`trace.entities.length` 触发 `TypeError: Cannot read properties of null (reading 'length')`
+
+**修复内容**：
+- 新增 `SignalingErrorBoundary` 类组件包裹页面
+- `trace.entities.length` 增加 `trace.entities &&` 空值检查
+- `trace.query_type.toUpperCase()` 增加空值保护
+- 所有 API 调用增加 HTTP 状态码检查和错误日志
+- `fetchTraceStatus`/`handleSelectTrace` 增加字段默认值填充
+- `LadderDiagram` 增加 `entities`/`messages` 空值检查
+
+### 问题二：信令追踪无法捕获数据
+
+**根因**：
+1. Open5GS 日志路径错误（硬编码 `/var/log/open5gs/`，实际在 `/usr/local/src/open5gs/install/var/log/open5gs/`）
+2. Kamailio 日志文件名不匹配（硬编码 `kamailio-pcscf.log`，实际为 `pcscf-2026-07-06.log`）
+3. Kamailio 日志正则太严格（要求 `<script>:` 前缀，实际日志有多种模块格式）
+4. SIP 方法正则太严格（要求 `"METHOD sip:... SIP/2.0"` 格式，Kamailio 日志只有 `METHOD sip:...`）
+5. SIP URI/IMSI 提取逻辑缺失（Kamailio 日志没有标准 SIP From/To 头）
+
+**修复内容**：
+- `handler/signaling.go`：修正 Open5GS 日志路径，新增 `findKamailioLogs()` 动态查找函数
+- `signaling/parser.go`：修正 Kamailio 日志正则（hostname 可选、进程名匹配 pcscf/scscf/icscf）
+- `signaling/parser.go`：新增 `reSIPMethodSimple` 匹配 Kamailio 格式
+- `signaling/parser.go`：`tryParseSIP` 增加从 body 直接提取 SIP URI 和 IMSI 的逻辑
+- `signaling/parser.go`：`extractIMSIdentifiers` 增加从 SIP URI 提取 IMSI 的正则
+
+### 修改文件
+
+- `frontend/src/pages/SignalingTrace.tsx` — ErrorBoundary + 空值安全 + 错误处理
+- `frontend/src/components/LadderDiagram.tsx` — 空值检查
+
+---
+
+## 阶段九：信令架构重构 — tshark 持续抓包 + HEP 监听 (2026-07-06)
+
+### 目标
+移除日志扫描方式，改为底层真实信令捕获：tshark 持续抓包 + Kamailio HEP 直接监听。
+
+### 已完成内容
+
+**新建文件：**
+- `backend/internal/signaling/capture_daemon.go` (367 行) — tshark 持续抓包守护进程，环形缓冲区
+- `backend/internal/signaling/tshark_query.go` (1130 行) — 从 pcap 环形缓冲区按条件查询信令
+- `backend/internal/signaling/hep_listener.go` (500 行) — UDP 9060 监听 Kamailio HEPv3 SIP 消息
+
+**重构文件：**
+- `backend/internal/signaling/parser.go` — 从 1478 行精简到 82 行（删除日志解析和旧 tshark 解析）
+- `backend/internal/handler/signaling.go` — runSignalingTrace 改为三级优先：HEP → Homer → tshark
+- `backend/internal/handler/handler.go` — 新增 TsharkQ/CapDaemon/HEPListener 字段
+- `backend/internal/config/config.go` — 新增 SignalingCaptureConfig/HEPListenerConfig
+- `backend/main.go` — 启动 CaptureDaemon + TsharkQuery + HEPListener
+- `backend/internal/router/router.go` — 新增 /signaling/capture/status + /signaling/hep/status 路由
+- `backend/config/config.json` — 新增 signaling_capture + hep_listener 配置段
+
+### Bug 修复
+- editcap 时间过滤使用 UTC 导致 pcap 包全部被过滤 → 改为本地时间
+- tshark 显示过滤无结果时返回错误 → 改为返回 nil（无消息非错误）
+- tshark 显示过滤对 S1AP/SIP/Diameter 无效（不携带 IMSI）→ 无结果时回退全量查询
+- IMSI 正则不匹配 Open5GS MME 日志格式 `IMSI:[xxx]` → 改为大小写+多格式
+
+### 验证结果
+```
+Trace: completed, 4875 messages, 9 entities
+Entities: [UE, eNB, MME, HSS, SGW, SMF, UPF, P-CSCF, S-CSCF]
+Protocols: PFCP(268), S1AP(80), Diameter(76), GTPv2C(56), SIP(20)
+```
+
+---
+
 ## 当前状态总结
 
 | 项目 | 状态 | 说明 |
 |------|------|------|
-| xCloud-CNMS 后端 | ✅ 稳定 | 19 个 handler（含 signaling），3 个 WS 端点，AIOps 已接入 |
-| xCloud-CNMS 前端 | ✅ 稳定 | 27 个页面（含 SignalingTrace），深色模式，i18n |
-| 文档体系 | ✅ 已建立 | 5 个文档全面更新，含信令追踪 |
+| xCloud-CNMS 后端 | ✅ 稳定 | 19 个 handler，4 个 WS 端点，AIOps 已接入 |
+| xCloud-CNMS 前端 | ✅ 稳定 | 27 个页面（含 SignalingTrace），深色模式，i18n，ErrorBoundary |
+| 文档体系 | ✅ 已建立 | 6 个文档全面更新 |
 | IMS 配置 | 🔄 调优中 | P/S/I-CSCF 已配置，持续优化 |
-| heplify | ✅ 已集成 | HEP 采集可用，未与主系统联动 |
-| 一键抓包 | ✅ 已完成 | tcpdump 管理、12 种协议预设、WebSocket 实时进度、PCAP 下载 |
-| 信令追踪 | ✅ 已完成 | 跨协议解析/关联/Ladder Diagram/Homer 集成 |
+| 一键抓包 | ✅ 已完成 | tcpdump 管理、12 种协议预设、WebSocket 实时进度 |
+| 信令持续抓包 | ✅ 已完成 | CaptureDaemon tshark 环形缓冲区 + TsharkQuery 查询引擎 |
+| HEP 监听 | ✅ 已完成 | UDP 9060 接收 Kamailio siptrace，50000 条缓冲区 |
+| 信令追踪 | ✅ 已完成 | 三级数据源 + Union-Find 关联 + Ladder Diagram |
+
+### 信令数据源架构（2026-07-06 更新）
+
+```
+优先级 1: Kamailio → HEPv3 → :9060/udp → HEPListener → SIP 消息缓冲区
+优先级 2: Homer API → 已存储的 SIP 消息（HEP 无数据时）
+优先级 3: tshark 持续抓包 → /var/spool/xcloud/signaling/ring_*.pcap → TsharkQuery
+```
+
+### 配置项（config.json）
+
+```json
+"signaling_capture": { "enabled": true, "interface": "any", "ring_dir": "/var/spool/xcloud/signaling", "ring_file_size_mb": 100, "ring_file_count": 20 }
+"hep_listener": { "enabled": true, "listen_addr": ":9060", "buffer_size": 50000 }
+```

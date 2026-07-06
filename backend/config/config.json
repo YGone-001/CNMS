@@ -24,5 +24,18 @@
     "username": "admin",
     "password": "sipcapture",
     "auth_token": ""
+  },
+  "signaling_capture": {
+    "enabled": true,
+    "interface": "any",
+    "ring_dir": "/var/spool/xcloud/signaling",
+    "ring_file_size_mb": 100,
+    "ring_file_count": 20,
+    "bpf_filter": ""
+  },
+  "hep_listener": {
+    "enabled": true,
+    "listen_addr": ":9060",
+    "buffer_size": 50000
   }
 }

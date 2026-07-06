@@ -34,6 +34,9 @@ type Handler struct {
 	UploadDir  string // 知识库文件上传目录
 	Homer      *signaling.HomerClient
 	HomerCfg   config.HomerConfig
+	TsharkQ    *signaling.TsharkQuery   // tshark 环形缓冲区查询引擎
+	CapDaemon  *signaling.CaptureDaemon // 信令持续抓包守护进程
+	HEPListener *signaling.HEPListener  // HEP 监听器（接收 Kamailio siptrace）
 }
 
 // New 创建 Handler 实例
@@ -63,6 +66,12 @@ func (h *Handler) SetHomer(cfg config.HomerConfig) {
 			AuthToken: cfg.AuthToken,
 		})
 	}
+}
+
+// SetSignalingCapture 设置信令持续抓包守护进程和环形缓冲区查询引擎
+func (h *Handler) SetSignalingCapture(daemon *signaling.CaptureDaemon, query *signaling.TsharkQuery) {
+	h.CapDaemon = daemon
+	h.TsharkQ = query
 }
 
 // LoginRequest 登录请求

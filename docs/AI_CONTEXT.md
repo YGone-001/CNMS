@@ -12,6 +12,10 @@ xCloud-CNMS 是一个专业的 4G/5G/IMS 核心网监控管理平台，面向电
 
 版本：v1.4.1
 
+**当前状态**：信令追踪模块已完成白屏修复和日志解析修复，可正常捕获 Open5GS + Kamailio 日志数据（已验证 601 条消息：398 SIP + 102 GTPv2C）。
+
+**最近更新**：2026-07-06 — 阶段八：SignalingTrace 白屏修复 + 日志解析修复
+
 ---
 
 ## 整体架构
@@ -180,16 +184,26 @@ MongoDB (历史指标) → aiops/aggregator.go (每小时聚合)
 ### 信令追踪流
 
 ```
+数据来源优先级：
+  1. HEPListener — Kamailio siptrace 通过 HEPv3 推送到 :9060/udp（优先，性能好）
+  2. Homer API — 从 Homer 查询已存储的 SIP 消息（辅助，HEP 无数据时）
+  3. TsharkQuery — 从 tshark 环形缓冲区 pcap 查询全协议（兜底）
+
 前端 SignalingTrace → POST /api/v1/signaling/trace (query_type/value/scenario/time_range)
                    → handler/signaling.go 创建 SignalingTrace (status=running)
                    → goroutine 异步执行:
-                     → signaling/parser.go 解析 Open5GS/Kamailio/FreeSWITCH 日志
-                     → signaling/parser.go 调用 tshark 解析 pcap 文件
-                     → signaling/hep.go 查询 Homer API 获取 SIP 消息（可选）
-                     → signaling/correlator.go Union-Fist 多维关联
+                     → HEPListener.QueryByIMSI() 从缓冲区查询 SIP 消息（优先）
+                     → h.Homer.Search() 查询 Homer API（HEP 无数据时）
+                     → TsharkQuery.Query() 从环形缓冲区 pcap 查询（兜底）
+                     → signaling/correlator.go Union-Find 多维关联
                      → MongoDB signaling_messages + signaling_traces (状态更新)
                    → 前端轮询 GET /api/v1/signaling/trace/{id} 检查状态
                    → 完成后加载消息 → LadderDiagram / MessageDetail / MediaQuality 展示
+
+关键组件：
+  - CaptureDaemon: tshark 持续抓包 → /var/spool/xcloud/signaling/ring_*.pcap（环形缓冲区 20×100MB）
+  - TsharkQuery: 从 pcap 按 IMSI/SIP/TEID 等条件查询（editcap 时间裁剪 + mergecap 合并 + tshark 显示过滤）
+  - HEPListener: UDP 9060 监听 HEPv3 包，解析 SIP 消息，按 IMSI/CallID 建索引（缓冲区 50000 条）
 ```
 
 ### 外部数据集成
@@ -210,7 +224,7 @@ MySQL scscf                → handler/business_metrics.go → S-CSCF 注册数
 - **MySQL (hss_db)**: IMS 订户数据（IMPI/IMPU 表）
 - **MySQL (scscf)**: S-CSCF 注册/联系数据
 - **配置文件**: JSON 格式，支持 fsnotify 热重载
-- **日志文件**: /var/log/xCloud/ (NF 日志), /var/log/cscf/ (IMS 日志)
+- **日志文件**: /usr/local/src/open5gs/install/var/log/open5gs/ (Open5GS), /var/log/cscf/ (Kamailio CSCF, 格式: pcscf-YYYY-MM-DD.log), /usr/local/freeswitch/log/freeswitch.log (FreeSWITCH)
 
 详细数据模型 → `architecture.md#数据模型`
 
@@ -340,7 +354,10 @@ AIOps 后台任务（通过 Scheduler）：
 - 前端深色/浅色主题、i18n 国际化
 - 审计日志、用户管理
 - 一键抓包（tcpdump 管理、12 种协议预设、BPF 注入防护、WebSocket 实时进度、PCAP 下载、RBAC 权限控制）
-- 跨协议信令追踪（15 种协议解析、Union-Find 关联引擎、Ladder Diagram 梯形图、Homer HEP 集成、媒体质量 MOS 仪表盘）
+- 信令持续抓包（CaptureDaemon：tshark 环形缓冲区 20×100MB，BPF 信令协议过滤，崩溃自动重启）
+- 信令追踪（三级数据源：HEPListener SIP 优先 + Homer API 辅助 + TsharkQuery pcap 兜底）
+- 跨协议关联引擎（Union-Find 10 维标识关联、Ladder Diagram 梯形图、媒体质量 MOS 仪表盘）
+- HEP 监听器（UDP 9060 接收 Kamailio siptrace HEPv3 数据，实时解析 SIP 消息，50000 条环形缓冲区）
 
 ### 规划中
 
