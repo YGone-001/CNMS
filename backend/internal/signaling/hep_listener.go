@@ -450,13 +450,7 @@ func (l *HEPListener) parseSIPPayload(pkt *hepPacket) *model.SignalingMessage {
 
 	// 推断接口和网元
 	msg.Interface = guessSIPInterface(pkt.SrcPort, pkt.DstPort)
-	if msg.Direction == "request" {
-		msg.SourceEntity = guessSIPSourceEntity(pkt.SrcPort)
-		msg.DestEntity = guessSIPDestEntity(pkt.DstPort)
-	} else {
-		msg.SourceEntity = guessSIPDestEntity(pkt.SrcPort)
-		msg.DestEntity = guessSIPSourceEntity(pkt.DstPort)
-	}
+	msg.SourceEntity, msg.DestEntity = guessSIPEntities(msg.Interface, msg.Direction)
 
 	// 存储原始 SIP 消息预览
 	if len(pkt.Payload) > 2000 {
@@ -466,20 +460,6 @@ func (l *HEPListener) parseSIPPayload(pkt *hepPacket) *model.SignalingMessage {
 	}
 
 	return msg
-}
-
-// guessSIPSourceEntity 根据源端口猜测 SIP 源网元
-func guessSIPSourceEntity(port int) string {
-	switch port {
-	case 5060, 5061:
-		return "P-CSCF"
-	case 6060:
-		return "S-CSCF"
-	case 7060:
-		return "AS"
-	default:
-		return "UE"
-	}
 }
 
 // -----------------------------------------------------------

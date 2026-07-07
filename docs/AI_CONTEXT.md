@@ -12,9 +12,9 @@ xCloud-CNMS 是一个专业的 4G/5G/IMS 核心网监控管理平台，面向电
 
 版本：v1.4.1
 
-**当前状态**：信令追踪模块已完成白屏修复和日志解析修复，可正常捕获 Open5GS + Kamailio 日志数据（已验证 601 条消息：398 SIP + 102 GTPv2C）。
+**当前状态**：信令追踪模块已完成协议接口-网元映射修正，Diameter Cx/S6a/Sh/Rx/Gx 等接口正确映射，SIP Gm/Mw/ISC 接口正确映射。tshark 查询逻辑优化为 `frame contains IMSI` 精确匹配。
 
-**最近更新**：2026-07-06 — 阶段八：SignalingTrace 白屏修复 + 日志解析修复
+**最近更新**：2026-07-07 — 阶段十：信令协议接口-网元映射全面修正
 
 ---
 
@@ -195,6 +195,8 @@ MongoDB (历史指标) → aiops/aggregator.go (每小时聚合)
                      → HEPListener.QueryByIMSI() 从缓冲区查询 SIP 消息（优先）
                      → h.Homer.Search() 查询 Homer API（HEP 无数据时）
                      → TsharkQuery.Query() 从环形缓冲区 pcap 查询（兜底）
+                       → buildDisplayFilter() 构建精确过滤器 (e212.imsi/nas_5gs.mm.supi)
+                       → 无结果时回退: frame contains "IMSI值" → 按协议逐个查询
                      → signaling/correlator.go Union-Find 多维关联
                      → MongoDB signaling_messages + signaling_traces (状态更新)
                    → 前端轮询 GET /api/v1/signaling/trace/{id} 检查状态
@@ -204,6 +206,21 @@ MongoDB (历史指标) → aiops/aggregator.go (每小时聚合)
   - CaptureDaemon: tshark 持续抓包 → /var/spool/xcloud/signaling/ring_*.pcap（环形缓冲区 20×100MB）
   - TsharkQuery: 从 pcap 按 IMSI/SIP/TEID 等条件查询（editcap 时间裁剪 + mergecap 合并 + tshark 显示过滤）
   - HEPListener: UDP 9060 监听 HEPv3 包，解析 SIP 消息，按 IMSI/CallID 建索引（缓冲区 50000 条）
+
+协议接口-网元映射（tshark_query.go）：
+  - SIP: Gm(UE↔P-CSCF), Mw(P-CSCF↔I-CSCF↔S-CSCF), ISC(S-CSCF↔AS)
+  - Diameter: Cx(I/S-CSCF↔HSS), S6a(MME↔HSS), Sh(S-CSCF/AS↔HSS), Rx(P-CSCF↔PCRF), Gx(PGW↔PCRF), N7(SMF↔PCF)
+  - GTPv2C: S11(MME↔SGW), S5/S8(SGW↔PGW), S10(MME↔MME)
+  - PFCP: N4(SMF↔UPF)
+  - S1AP: S1-MME(eNB↔MME), NGAP: N2(gNB↔AMF)
+  - NAS: N1(UE↔AMF), S1-MME(UE↔MME)
+  - SGsAP: SGs(MME↔MSC)
+
+已知限制：
+  - pcap 使用 Linux cooked-mode capture (sll)，tshark JSON 对 TCP 协议(SIP/Diameter)解析不完整
+  - SIP 的 method/status_code/direction 字段可能为空
+  - Diameter 的 IMSI/Origin-Host 等 AVP 未从 JSON 提取
+  - 跨协议关联(SIP↔Diameter)依赖 IMSI 标识提取，当前受限于 tshark JSON 输出
 ```
 
 ### 外部数据集成
@@ -326,6 +343,8 @@ AIOps 后台任务（通过 Scheduler）：
 11. **auth 未启用时 RequireRole 放行**: auth.enabled=false 时 JWT 中间件不运行，context 无 claims；RequireRole 遇到无 claims 时直接放行，handler 内部检查同样跳过角色校验
 12. **信令追踪异步执行**: 创建追踪后立即返回 trace_id，后台 goroutine 执行解析/关联/存储，前端轮询状态
 13. **Union-Find 跨协议关联**: 使用 10 维标识（IMSI/SUPI/MSISDN/SIP URI/TEID/UE IP 等）关联不同协议消息到同一用户会话
+14. **协议接口-网元映射**: 根据 IANA 标准和 3GPP 规范，Diameter 按 App-ID+命令码区分接口和网元，SIP 按端口区分 Gm/Mw/ISC 接口
+15. **tshark 查询 fallback**: display filter 无结果时，使用 `frame contains "IMSI值"` 精确搜索，而非无过滤全量查询
 
 ---
 
@@ -358,6 +377,7 @@ AIOps 后台任务（通过 Scheduler）：
 - 信令追踪（三级数据源：HEPListener SIP 优先 + Homer API 辅助 + TsharkQuery pcap 兜底）
 - 跨协议关联引擎（Union-Find 10 维标识关联、Ladder Diagram 梯形图、媒体质量 MOS 仪表盘）
 - HEP 监听器（UDP 9060 接收 Kamailio siptrace HEPv3 数据，实时解析 SIP 消息，50000 条环形缓冲区）
+- 协议接口-网元映射（Diameter Cx/S6a/Sh/Rx/Gx/N7, SIP Gm/Mw/ISC, GTPv2C S11/S5/S8/S10, PFCP N4, S1AP/NGAP/NAS/SGsAP）
 
 ### 规划中
 

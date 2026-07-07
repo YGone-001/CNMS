@@ -24,7 +24,7 @@
 
 - [x] 信令追踪模块完善
 
-  - Phase 7-9 已完成，架构重构为 tshark 持续抓包 + HEP 监听
+  - Phase 7-10 已完成，架构重构为 tshark 持续抓包 + HEP 监听 + 协议接口映射修正
   - 已完成：
     - ✅ 白屏修复（ErrorBoundary + 空值安全）
     - ✅ 移除日志扫描，改为底层真实信令捕获
@@ -32,12 +32,35 @@
     - ✅ TsharkQuery 从 pcap 按 IMSI/SIP/TEID 等条件查询
     - ✅ HEPListener UDP 9060 监听 Kamailio siptrace
     - ✅ 三级数据源优先级：HEP → Homer → tshark
-    - ✅ 已验证：4875 条消息，9 个网元（UE/eNB/MME/HSS/SGW/SMF/UPF/P-CSCF/S-CSCF）
+    - ✅ tshark 查询优化：frame contains IMSI 精确匹配（非无过滤全量查询）
+    - ✅ Diameter 接口映射修正（Cx/S6a/Sh/Rx/Gx/N7/SWx/S6b/Gxx/S13/Base）
+    - ✅ Diameter 网元推断（根据 App-ID + 命令码区分 I-CSCF/S-CSCF/HSS）
+    - ✅ SIP 接口映射修正（Gm=UE↔P-CSCF, Mw=P-CSCF↔I-CSCF, ISC=S-CSCF↔AS）
+    - ✅ GTPv2C/PFCP/S1AP/NGAP/NAS/SGsAP 方向检测和接口映射
+  - 已知限制：
+    - pcap 使用 sll 封装，tshark JSON 对 TCP 协议解析不完整
+    - SIP 的 method/status_code/direction 字段可能为空
+    - 跨协议关联(SIP↔Diameter)受限于 IMSI 标识提取
   - 待完善：
+    - 解决 tshark JSON 对 TCP 协议(SIP/Diameter)解析不完整问题
+    - 跨协议关联逻辑（SIP↔Diameter 交互流：Gm→Mw→Cx:UAR→Cx:SAR）
     - OpenAPI 文档补丁（swagger.go 未更新）
     - 前端 i18n 词条提取
     - Ladder Diagram 性能优化（>500 条消息时）
-    - 前端抓包状态展示页面
+
+- [ ] tshark JSON 对 TCP 协议解析问题
+
+  - 背景：pcap 使用 Linux cooked-mode capture (sll)，tshark JSON 输出对 SIP/Diameter 等 TCP 协议解析不完整
+  - 影响：SIP 的 method/status_code/direction 字段为空，Diameter 的 IMSI/Origin-Host AVP 未提取
+  - 解决方案：改用 pcapng 格式捕获，或使用 tshark -T ek 格式，或解析原始包数据
+  - 验证方式：SIP 消息显示完整的 method/status_code/direction，Diameter 消息显示 IMSI 等标识
+
+- [ ] 跨协议关联逻辑完善（SIP↔Diameter 交互流）
+
+  - 背景：UE 注册流程涉及 Gm→Mw→Cx:UAR→Cx:SAR，需要关联 SIP 和 Diameter 消息
+  - 依赖：解决 tshark JSON TCP 协议解析问题后，才能提取 SIP URI/Call-ID 和 Diameter IMSI
+  - 关联链：Gm(UE→P-CSCF) → Mw(→I-CSCF) → Cx:UAR(I-CSCF→HSS) → Mw(→S-CSCF) → Cx:SAR(S-CSCF→HSS)
+  - 验证方式：追踪一个 UE 注册流程，Ladder Diagram 显示完整的 SIP+Diameter 交互
 
 - [ ] IMS VoLTE 呼叫流程端到端验证
 

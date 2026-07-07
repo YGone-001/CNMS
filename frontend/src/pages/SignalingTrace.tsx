@@ -649,7 +649,7 @@ function SignalingTrace() {
                     <div
                       key={trace.trace_id}
                       onClick={() => handleSelectTrace(trace)}
-                      className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors ${
+                      className={`group flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors ${
                         isActive
                           ? 'bg-sky-500/10 border-l-2 border-l-sky-500'
                           : 'hover:bg-noc-bg-50 border-l-2 border-l-transparent'

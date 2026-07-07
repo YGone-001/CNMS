@@ -348,6 +348,65 @@ Protocols: PFCP(268), S1AP(80), Diameter(76), GTPv2C(56), SIP(20)
 
 ---
 
+## 阶段十：信令协议接口-网元映射修正 (2026-07-07)
+
+**状态**: ✅ 已完成
+
+### 问题
+
+1. Diameter 接口字段为空 — tshark JSON 字段名 `diameter.applicationId` 与代码中 `diameter.app.id` 不一致
+2. Diameter 网元硬编码 MME→HSS — 未根据 App-ID 和命令码区分 I-CSCF/S-CSCF/HSS
+3. SIP 接口映射错误 — Mw 被误标为 UE↔S-CSCF，ISC 被误标为 UE↔AS
+4. tshark 查询 fallback 逻辑粗暴 — 无过滤全量查询返回随机500条 Diameter+PFCP
+5. SMF/UPF 错误判定 — PFCP 消息硬编码为 SMF→UPF，即使 SMF/UPF 未运行
+
+### 修复内容
+
+**tshark_query.go — Diameter 映射修正：**
+- `diameterInterface()`: 修正 App-ID 映射，App-ID=0 改为 "Base"（非 S6a），S6a 标准 ID=16777251
+- 新增 App-ID: Gxx(16777239), SWx(16777250), S6b(16777252), N7(16777267), S13(16777272)
+- `parseDiameterFromLayers()`: 字段名从 `diameter.app.id` 改为 `diameter.applicationId`
+- `parseDiameterFromLayers()`: 方向检测从 `diameter.flags.proxiable` 改为 `diameter.flags_tree.diameter.flags.request`
+- `guessDiameterEntities()`: Cx 接口根据命令码区分（300=I-CSCF, 301=S-CSCF, 302=I-CSCF, 303=S-CSCF, 304/305=HSS→S-CSCF, 280=双向对等）
+- `extractDiameterOriginHost()`: 新增，从 AVP tree 提取 Origin-Host
+
+**tshark_query.go — SIP 映射修正：**
+- `guessSIPInterface()`: 任一端口命中即可判断（5060/5061=Gm, 6060=Mw, 7060=ISC）
+- `guessSIPEntities()`: 新增，根据接口+方向推断网元
+  - Gm: UE↔P-CSCF, Mw: P-CSCF↔I-CSCF, ISC: S-CSCF↔AS
+
+**tshark_query.go — 查询逻辑优化：**
+- fallback 逻辑：无过滤全量查询 → `frame contains "IMSI值"` 精确搜索 → 按协议逐个查询
+- 新增 `gtpv2Direction()`: GTPv2C 消息类型判断方向（偶数=请求, 奇数=响应）
+- 新增 `pfcpDirection()`: PFCP 消息类型 1-50=请求, 51-100=响应
+
+**tshark_query.go — 其他协议方向检测：**
+- S1AP: 通过 `s1ap.successfulOutcome`/`s1ap.unsuccessfulOutcome` 判断响应
+- NGAP: 同 S1AP
+- GTPv2C: 新增 S5/S8, S10 接口映射
+- PFCP: N4 接口 SMF↔UPF，响应方向交换
+
+**hep_listener.go — SIP 映射修正：**
+- 删除 `guessSIPSourceEntity()`，改用 `guessSIPEntities()`
+
+### 验证结果
+
+```
+Trace: completed, 455 messages
+Protocols: SIP(415), Diameter(40)
+SIP: P-CSCF → UE [Gm] (415 条响应)
+Diameter: HSS → S-CSCF [Cx] (27), HSS → I-CSCF [Cx] (13)
+```
+
+### 已知限制
+
+- pcap 使用 Linux cooked-mode capture (sll)，tshark JSON 对 TCP 协议(SIP/Diameter)解析不完整
+- SIP 的 method/status_code/direction 字段为空（tshark JSON 未包含 SIP 层详情）
+- Diameter 的 IMSI/Origin-Host 等 AVP 未从 JSON 提取
+- 跨协议关联(SIP↔Diameter)依赖 IMSI 标识提取，当前受限于 tshark JSON 输出
+
+---
+
 ## 当前状态总结
 
 | 项目 | 状态 | 说明 |
@@ -360,13 +419,15 @@ Protocols: PFCP(268), S1AP(80), Diameter(76), GTPv2C(56), SIP(20)
 | 信令持续抓包 | ✅ 已完成 | CaptureDaemon tshark 环形缓冲区 + TsharkQuery 查询引擎 |
 | HEP 监听 | ✅ 已完成 | UDP 9060 接收 Kamailio siptrace，50000 条缓冲区 |
 | 信令追踪 | ✅ 已完成 | 三级数据源 + Union-Find 关联 + Ladder Diagram |
+| 协议接口映射 | ✅ 已修正 | Diameter/SIP/GTPv2/PFCP/S1AP/NGAP/NAS/SGsAP 全面修正 |
 
-### 信令数据源架构（2026-07-06 更新）
+### 信令数据源架构（2026-07-07 更新）
 
 ```
 优先级 1: Kamailio → HEPv3 → :9060/udp → HEPListener → SIP 消息缓冲区
 优先级 2: Homer API → 已存储的 SIP 消息（HEP 无数据时）
 优先级 3: tshark 持续抓包 → /var/spool/xcloud/signaling/ring_*.pcap → TsharkQuery
+           → frame contains "IMSI值" 精确匹配（非无过滤全量查询）
 ```
 
 ### 配置项（config.json）
