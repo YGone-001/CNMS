@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -77,6 +78,7 @@ func (q *TsharkQuery) Query(queryType, queryValue string, timeRange model.TimeRa
 	if len(messages) == 0 && displayFilter != "" {
 		log.Printf("[TsharkQuery] display filter returned 0, trying frame contains fallback")
 		fallbackFilter := fmt.Sprintf(`frame contains "%s"`, queryValue)
+		displayFilter = fallbackFilter // 更新 filter 供后续 fields 补充使用
 		messages, err = q.runTshark(workFile, fallbackFilter)
 		if err != nil {
 			return nil, fmt.Errorf("tshark fallback query: %w", err)
@@ -109,6 +111,25 @@ func (q *TsharkQuery) Query(queryType, queryValue string, timeRange model.TimeRa
 				}
 			}
 			messages = allMessages
+		}
+	}
+
+	// 7. 用 -T fields 补充 JSON 无法提取的字段（Diameter AVP: Origin-Host/User-Name/Session-Id 等）
+	//    对 fallback 结果同样有效（使用无过滤查询，按时间戳匹配）
+	if len(messages) > 0 {
+		fieldFilter := displayFilter
+		if fieldFilter == "" && queryValue != "" {
+			fieldFilter = fmt.Sprintf(`frame contains "%s"`, queryValue)
+		}
+		// fieldFilter 可能为空（queryType=all 场景），此时用协议过滤
+		if fieldFilter == "" {
+			fieldFilter = "sip || diameter || gtpv2 || pfcp || s1ap || ngap"
+		}
+		if fieldRecords, ferr := q.runTsharkFields(workFile, fieldFilter); ferr == nil {
+			supplementMessages(messages, fieldRecords)
+			log.Printf("[TsharkQuery] fields supplement: %d records merged into %d messages", len(fieldRecords), len(messages))
+		} else {
+			log.Printf("[TsharkQuery] fields supplement failed (non-fatal): %v", ferr)
 		}
 	}
 
@@ -335,15 +356,6 @@ func (q *TsharkQuery) mergecap(files []string, output string) error {
 // tshark 执行与 JSON 解析
 // -----------------------------------------------------------
 
-// tsharkJSONEntry tshark -T json 输出的单条记录结构
-type tsharkJSONEntry struct {
-	Source tsharkJSONSource `json:"_source"`
-}
-
-type tsharkJSONSource struct {
-	Layers map[string]any `json:"layers"`
-}
-
 // runTshark 执行 tshark 并流式解析 JSON 输出
 func (q *TsharkQuery) runTshark(pcapFile, displayFilter string) ([]model.SignalingMessage, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), q.Timeout)
@@ -351,8 +363,12 @@ func (q *TsharkQuery) runTshark(pcapFile, displayFilter string) ([]model.Signali
 
 	args := []string{
 		"-r", pcapFile,
+		"-2", // 两遍模式：第一遍收集 TCP 流上下文，第二遍重组后解析
+		"-o", "tcp.desegment_tcp_streams:TRUE",
+		"-o", "tcp.check_checksum:FALSE", // 忽略校验和（Linux offload 常导致校验和错误）
 		"-T", "json",
-		"-j", "frame sip diameter gtpv2 gtp pfcp s1ap ngap nas-5gs nas-eps sgsap ip ipv6 sctp tcp udp",
+		// 注意：不使用 -j 参数 — -j 会导致 tshark 输出过滤后的子树（如 {"filtered": "sip.Request-Line"}），
+		// 丢失 sip.Method、sip.Status-Code 等关键字段。
 		"-c", strconv.Itoa(q.MaxPackets),
 	}
 	if displayFilter != "" {
@@ -413,6 +429,306 @@ func (q *TsharkQuery) runTshark(pcapFile, displayFilter string) ([]model.Signali
 	}
 
 	return messages, nil
+}
+
+// fieldsRecord 用于 -T fields 补充查询的结果记录
+type fieldsRecord struct {
+	Timestamp     string
+	SrcIP         string
+	DstIP         string
+	SrcPort       string
+	DstPort       string
+	SIPMethod     string
+	SIPStatusCode string
+	SIPCallID     string
+	SIPCSeq       string
+	SIPFromUser   string
+	SIPToUser     string
+	DiamCmdCode   string
+	DiamAppID     string
+	DiamRequest   string
+	DiamResult    string
+	DiamOriginH   string
+	DiamUser      string
+	DiamSession   string
+	GTPv2Type     string
+	GTPv2TEID     string
+	GTPv2Cause    string
+	GTPv2PAA      string // UE IPv4 from PDN Address Allocation
+	PFCPType      string
+	PFCPSEID      string
+	S1APProc      string
+	NGAPProc      string
+}
+
+// runTsharkFields 使用 -T fields 提取特定字段。
+// 用于补充 -T json 无法提取的 Diameter AVP（Origin-Host, User-Name, Session-Id）
+// 和 SIP 头部字段。返回按时间戳索引的记录。
+func (q *TsharkQuery) runTsharkFields(pcapFile, displayFilter string) ([]fieldsRecord, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), q.Timeout)
+	defer cancel()
+
+	args := []string{
+		"-r", pcapFile,
+		"-2",
+		"-o", "tcp.desegment_tcp_streams:TRUE",
+		"-o", "tcp.check_checksum:FALSE",
+		"-T", "fields",
+		"-e", "frame.time_epoch",
+		"-e", "ip.src", "-e", "ip.dst",
+		"-e", "tcp.srcport", "-e", "tcp.dstport",
+		"-e", "udp.srcport", "-e", "udp.dstport",
+		// SIP 字段
+		"-e", "sip.Method", "-e", "sip.Status-Code", "-e", "sip.Call-ID",
+		"-e", "sip.CSeq.method",
+		"-e", "sip.from.user", "-e", "sip.to.user",
+		// Diameter AVP 字段（-T json 无法提取这些）
+		"-e", "diameter.cmd.code", "-e", "diameter.applicationId",
+		"-e", "diameter.flags.request",
+		"-e", "diameter.Result-Code", "-e", "diameter.Origin-Host",
+		"-e", "diameter.User-Name", "-e", "diameter.Session-Id",
+		// GTPv2
+		"-e", "gtpv2.message_type", "-e", "gtpv2.teid", "-e", "gtpv2.cause",
+		"-e", "gtpv2.pdn_addr_and_prefix.ipv4", // UE IPv4 (PAA)
+		// PFCP
+		"-e", "pfcp.msg_type", "-e", "pfcp.seid",
+		// S1AP/NGAP
+		"-e", "s1ap.procedureCode", "-e", "ngap.procedureCode",
+		"-c", strconv.Itoa(q.MaxPackets),
+	}
+	if displayFilter != "" {
+		args = append(args, "-Y", displayFilter)
+	}
+
+	log.Printf("[TsharkQuery] fields supplement: tshark %s", strings.Join(args, " "))
+
+	// 验证文件存在
+	if _, statErr := os.Stat(pcapFile); statErr != nil {
+		return nil, fmt.Errorf("pcap file not found: %w", statErr)
+	}
+
+	cmd := exec.CommandContext(ctx, "tshark", args...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stdout pipe: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stderr pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("start tshark fields: %w", err)
+	}
+
+	var records []fieldsRecord
+	scanner := bufio.NewScanner(bufio.NewReaderSize(stdout, 256*1024))
+	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024) // 1MB buffer for long lines
+	lineCount := 0
+	for scanner.Scan() {
+		line := scanner.Text()
+		lineCount++
+		if line == "" {
+			continue
+		}
+		cols := strings.Split(line, "\t")
+		// 填充不足的列
+		for len(cols) < 20 {
+			cols = append(cols, "")
+		}
+		rec := fieldsRecord{
+			Timestamp:     cols[0],
+			SrcIP:         cols[1],
+			DstIP:         cols[2],
+			SrcPort:       cols[3],
+			DstPort:       cols[4],
+			SIPMethod:     cols[7],
+			SIPStatusCode: cols[8],
+			SIPCallID:     cols[9],
+			SIPCSeq:       cols[10],
+			SIPFromUser:   cols[11],
+			SIPToUser:     cols[12],
+			DiamCmdCode:   cols[13],
+			DiamAppID:     cols[14],
+			DiamRequest:   cols[15],
+			DiamResult:    cols[16],
+			DiamOriginH:   cols[17],
+			DiamUser:      cols[18],
+			DiamSession:   cols[19],
+		}
+		if len(cols) > 20 {
+			rec.GTPv2Type = cols[20]
+		}
+		if len(cols) > 21 {
+			rec.GTPv2TEID = cols[21]
+		}
+		if len(cols) > 22 {
+			rec.GTPv2Cause = cols[22]
+		}
+		if len(cols) > 23 {
+			rec.GTPv2PAA = cols[23]
+		}
+		if len(cols) > 24 {
+			rec.PFCPType = cols[24]
+		}
+		if len(cols) > 25 {
+			rec.PFCPSEID = cols[25]
+		}
+		if len(cols) > 26 {
+			rec.S1APProc = cols[26]
+		}
+		if len(cols) > 27 {
+			rec.NGAPProc = cols[27]
+		}
+		records = append(records, rec)
+	}
+	if scanErr := scanner.Err(); scanErr != nil {
+		log.Printf("[TsharkQuery] fields scanner error after %d lines: %v", lineCount, scanErr)
+	}
+
+	// 读取 stderr
+	stderrBytes, _ := io.ReadAll(stderr)
+	if err := cmd.Wait(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			if exitErr.ExitCode() != 1 {
+				return records, fmt.Errorf("tshark fields exit %d: %s", exitErr.ExitCode(), string(stderrBytes))
+			}
+		}
+	}
+	if len(stderrBytes) > 0 {
+		log.Printf("[TsharkQuery] fields stderr: %s", string(stderrBytes)[:min(len(stderrBytes), 500)])
+	}
+
+	log.Printf("[TsharkQuery] fields: %d lines scanned, %d records parsed", lineCount, len(records))
+	return records, nil
+}
+
+// supplementMessages 用 -T fields 补充数据填充 JSON 解析中缺失的字段。
+// 匹配策略：按时间戳近似匹配（±0.001s）+ 协议 + 方法
+func supplementMessages(messages []model.SignalingMessage, fields []fieldsRecord) {
+	if len(fields) == 0 {
+		return
+	}
+
+	// 构建 fields 记录索引：按协议分组
+	type fi struct {
+		rec   fieldsRecord
+		tsSec float64
+	}
+	var sipFields, diamFields []fi
+	for _, f := range fields {
+		ts, _ := strconv.ParseFloat(f.Timestamp, 64)
+		entry := fi{rec: f, tsSec: ts}
+		if f.SIPMethod != "" || f.SIPStatusCode != "" {
+			sipFields = append(sipFields, entry)
+		}
+		if f.DiamCmdCode != "" {
+			diamFields = append(diamFields, entry)
+		}
+	}
+
+	for i := range messages {
+		msg := &messages[i]
+		ts := float64(msg.Timestamp.UnixMicro()) / 1e6
+
+		if msg.Protocol == "SIP" {
+			// 尝试从 SIP fields 补充
+			for _, sf := range sipFields {
+				if abs64(sf.tsSec-ts) > 0.01 {
+					continue
+				}
+				// 补充缺失字段
+				if msg.Method == "" && sf.rec.SIPMethod != "" {
+					msg.Method = sf.rec.SIPMethod
+					msg.Direction = "request"
+				}
+				if msg.StatusCode == 0 && sf.rec.SIPStatusCode != "" {
+					c, _ := strconv.Atoi(sf.rec.SIPStatusCode)
+					msg.StatusCode = c
+					msg.Direction = "response"
+				}
+				if msg.CallID == "" && sf.rec.SIPCallID != "" {
+					msg.CallID = sf.rec.SIPCallID
+					msg.Identifiers.CallID = sf.rec.SIPCallID
+				}
+				if msg.Identifiers.SIPURI == "" && sf.rec.SIPFromUser != "" {
+					msg.Identifiers.SIPURI = sf.rec.SIPFromUser
+					msg.Identifiers.MSISDN = extractMSISDN(sf.rec.SIPFromUser)
+					if imsi := extractIMSI(sf.rec.SIPFromUser); imsi != "" {
+						msg.Identifiers.IMSI = imsi
+					}
+				}
+				if _, ok := msg.Details["cseq_method"]; !ok && sf.rec.SIPCSeq != "" {
+					msg.Details["cseq_method"] = sf.rec.SIPCSeq
+				}
+				break
+			}
+		}
+
+		if msg.Protocol == "Diameter" {
+			// 尝试从 Diameter fields 补充
+			for _, df := range diamFields {
+				if abs64(df.tsSec-ts) > 0.01 {
+					continue
+				}
+				// 补充 Origin-Host
+				if _, ok := msg.Details["origin_host"]; !ok && df.rec.DiamOriginH != "" {
+					msg.Details["origin_host"] = df.rec.DiamOriginH
+				}
+				// 补充 User-Name (IMSI)
+				if msg.Identifiers.IMSI == "" && df.rec.DiamUser != "" {
+					// User-Name 可能是 IMSI 或 SIP URI
+					if imsi := extractIMSI(df.rec.DiamUser); imsi != "" {
+						msg.Identifiers.IMSI = imsi
+					}
+					// 也存入 SIPURI（可能是 IMPU 格式如 417010000000003@ims...）
+					if strings.Contains(df.rec.DiamUser, "@") {
+						msg.Identifiers.SIPURI = df.rec.DiamUser
+						msg.Identifiers.IMPU = df.rec.DiamUser
+					}
+				}
+				// 补充 Session-Id → CallID（Diameter Session-Id 用于关联同一会话）
+				if msg.Identifiers.CallID == "" && df.rec.DiamSession != "" {
+					msg.Identifiers.CallID = df.rec.DiamSession
+				}
+				// 补充 Result-Code
+				if msg.StatusCode == 0 && df.rec.DiamResult != "" {
+					c, _ := strconv.Atoi(df.rec.DiamResult)
+					msg.StatusCode = c
+				}
+				break
+			}
+		}
+
+		// GTPv2 补充 cause + UE IPv4
+		if msg.Protocol == "GTPv2C" {
+			for _, f := range fields {
+				fTs, _ := strconv.ParseFloat(f.Timestamp, 64)
+				if abs64(fTs-ts) > 0.01 {
+					continue
+				}
+				// 补充 cause
+				if msg.StatusCode == 0 && f.GTPv2Cause != "" {
+					c, _ := strconv.Atoi(f.GTPv2Cause)
+					if c > 0 {
+						msg.StatusCode = c
+						msg.Details["cause"] = c
+					}
+				}
+				// 补充 UE IPv4 (PAA - PDN Address Allocation)
+				if msg.Identifiers.UEIPv4 == "" && f.GTPv2PAA != "" {
+					msg.Identifiers.UEIPv4 = f.GTPv2PAA
+				}
+				break
+			}
+		}
+	}
+}
+
+func abs64(x float64) float64 {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
 
 // -----------------------------------------------------------
@@ -530,7 +846,41 @@ func parseTransportPorts(layers map[string]any, msg *model.SignalingMessage) {
 	}
 }
 
+// findInMap 在嵌套 map 中递归查找指定 key，返回第一个匹配的值。
+// tshark -T json 的 SIP 输出层级很深，例如：
+//
+//	sip.Method 在 sip.Request-Line_tree.sip.Method
+//	sip.Status-Code 在 sip.Status-Line_tree.sip.Status-Code
+//	sip.from.user 在 sip.msg_hdr_tree.sip.From_tree.sip.from.addr_tree.sip.from.user
+//	sip.Call-ID 在 sip.msg_hdr_tree.sip.Call-ID
+func findInMap(m map[string]any, key string) (string, bool) {
+	// 直接查找
+	if v, ok := m[key]; ok {
+		if s, ok := v.(string); ok && s != "" {
+			return s, true
+		}
+	}
+	// 递归查找子 map
+	for _, v := range m {
+		if sub, ok := v.(map[string]any); ok {
+			if s, found := findInMap(sub, key); found {
+				return s, true
+			}
+		}
+	}
+	return "", false
+}
+
 // parseSIPFromLayers 解析 SIP 协议
+// tshark -T json 的 SIP 层结构：
+//
+//	sip.Request-Line_tree.sip.Method          (请求方法)
+//	sip.Status-Line_tree.sip.Status-Code      (响应码)
+//	sip.Status-Line_tree.sip.Status-Phrase    (响应短语)
+//	sip.msg_hdr_tree.sip.From_tree.sip.from.addr_tree.sip.from.user  (From URI user)
+//	sip.msg_hdr_tree.sip.To_tree.sip.to.addr_tree.sip.to.user       (To URI user)
+//	sip.msg_hdr_tree.sip.Call-ID              (Call-ID)
+//	sip.msg_hdr_tree.sip.CSeq_tree.sip.CSeq.method  (CSeq 方法)
 func parseSIPFromLayers(msg *model.SignalingMessage, raw any) {
 	sip, ok := raw.(map[string]any)
 	if !ok {
@@ -542,42 +892,90 @@ func parseSIPFromLayers(msg *model.SignalingMessage, raw any) {
 	// 根据端口判断接口
 	msg.Interface = guessSIPInterface(msg.SourcePort, msg.DestPort)
 
-	if m, ok := sip["sip.Method"].(string); ok && m != "" {
+	// Method — 从 Request-Line_tree 或 Status-Line_tree 提取
+	if m, ok := findInMap(sip, "sip.Method"); ok {
 		msg.Method = m
 		msg.Direction = "request"
 	}
-	if code, ok := sip["sip.Status-Code"].(string); ok && code != "" {
+	if code, ok := findInMap(sip, "sip.Status-Code"); ok {
 		c, _ := strconv.Atoi(code)
 		msg.StatusCode = c
 		msg.Direction = "response"
-		if phrase, ok := sip["sip.Status-Phrase"].(string); ok {
+		if phrase, ok := findInMap(sip, "sip.Status-Phrase"); ok {
 			msg.StatusText = phrase
 		}
 	}
-	if from, ok := sip["sip.from.user"].(string); ok {
+
+	// From/To URI — 递归查找
+	if from, ok := findInMap(sip, "sip.from.user"); ok {
 		msg.Identifiers.MSISDN = extractMSISDN(from)
 		msg.Identifiers.SIPURI = from
+		// 尝试从 SIP URI 提取 IMSI（如 sip:417010000000003@ims.mnc001.mcc417.3gppnetwork.org）
+		if imsi := extractIMSI(from); imsi != "" {
+			msg.Identifiers.IMSI = imsi
+		}
 	}
-	if to, ok := sip["sip.to.user"].(string); ok {
+	if to, ok := findInMap(sip, "sip.to.user"); ok {
 		if msg.Identifiers.MSISDN == "" {
 			msg.Identifiers.MSISDN = extractMSISDN(to)
 		}
+		if msg.Identifiers.IMSI == "" {
+			if imsi := extractIMSI(to); imsi != "" {
+				msg.Identifiers.IMSI = imsi
+			}
+		}
 	}
-	if callID, ok := sip["sip.Call-ID"].(string); ok {
+	if callID, ok := findInMap(sip, "sip.Call-ID"); ok {
 		msg.CallID = callID
 		msg.Identifiers.CallID = callID
+	}
+
+	// CSeq 方法 — 用于 correlator 的 IMS 注册检查
+	if cseqMethod, ok := findInMap(sip, "sip.CSeq.method"); ok {
+		msg.Details["cseq_method"] = cseqMethod
+	}
+
+	// Contact URI
+	if contact, ok := findInMap(sip, "sip.contact.user"); ok {
+		msg.Details["sip.contact.user"] = contact
 	}
 
 	// 网元推断 — 根据接口类型和方向
 	msg.SourceEntity, msg.DestEntity = guessSIPEntities(msg.Interface, msg.Direction)
 
-	// 存储 SIP 特定字段到 details
+	// 存储 SIP 特定字段到 details（递归提取）
 	for _, key := range []string{"sip.Method", "sip.Status-Code", "sip.Status-Phrase",
-		"sip.from.user", "sip.to.user", "sip.Call-ID", "sip.contact.addr", "sip.Request-URI"} {
-		if v, ok := sip[key]; ok {
+		"sip.from.user", "sip.to.user", "sip.Call-ID", "sip.Request-URI"} {
+		if v, ok := findInMap(sip, key); ok {
 			msg.Details[key] = v
 		}
 	}
+}
+
+// extractIMSI 从字符串中提取 15 位 IMSI（以 460/417/310 等 MCC 开头）
+func extractIMSI(s string) string {
+	// 清理非数字字符
+	digits := strings.Map(func(r rune) rune {
+		if r >= '0' && r <= '9' {
+			return r
+		}
+		return -1
+	}, s)
+	// 查找 15 位 IMSI 模式
+	for i := 0; i <= len(digits)-15; i++ {
+		candidate := digits[i : i+15]
+		// 检查是否以已知 MCC 开头
+		mcc := candidate[:3]
+		switch mcc {
+		case "460", "417", "310", "311", "312", "262", "208", "234", "235", "440", "441", "450", "452", "520", "525":
+			return candidate
+		}
+	}
+	// 如果没有匹配已知 MCC，但有 15 位纯数字，也返回（可能是测试 IMSI）
+	if len(digits) >= 15 {
+		return digits[:15]
+	}
+	return ""
 }
 
 // parseDiameterFromLayers 解析 Diameter 协议
@@ -671,6 +1069,16 @@ func parseGTPv2FromLayers(msg *model.SignalingMessage, raw any) {
 	}
 	if apn, ok := gtp["gtpv2.apn"].(string); ok {
 		msg.Details["apn"] = apn
+	}
+	// GTPv2 Cause (3GPP TS 29.274: 16=Request Accepted)
+	if cause, ok := findInMap(gtp, "gtpv2.cause"); ok {
+		c, _ := strconv.Atoi(cause)
+		msg.StatusCode = c
+		msg.Details["cause"] = c
+	}
+	// UE IPv4 (PDN Address Allocation)
+	if paa, ok := findInMap(gtp, "gtpv2.pdn_addr_and_prefix.ipv4"); ok {
+		msg.Identifiers.UEIPv4 = paa
 	}
 
 	// 接口和实体推断
@@ -916,12 +1324,6 @@ func guessSIPEntities(iface string, direction string) (src, dst string) {
 		}
 		return "P-CSCF", "UE"
 	}
-}
-
-// guessGTPv2Interface 根据端口猜测 GTPv2-C 接口
-func guessGTPv2Interface(srcPort, dstPort int) string {
-	// GTPv2-C 使用端口 2123，接口取决于网元对
-	return "S11"
 }
 
 // extractDiameterOriginHost 从 tshark JSON 的 AVP tree 中提取 Origin-Host

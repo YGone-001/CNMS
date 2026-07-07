@@ -12,9 +12,9 @@ xCloud-CNMS 是一个专业的 4G/5G/IMS 核心网监控管理平台，面向电
 
 版本：v1.4.1
 
-**当前状态**：信令追踪模块已完成协议接口-网元映射修正，Diameter Cx/S6a/Sh/Rx/Gx 等接口正确映射，SIP Gm/Mw/ISC 接口正确映射。tshark 查询逻辑优化为 `frame contains IMSI` 精确匹配。
+**当前状态**：信令追踪模块已完成 tshark JSON 输出修复和跨协议关联增强。SIP 字段（Method/Status-Code/From/To）正常提取，Diameter AVP（Origin-Host/User-Name）通过 -T fields 补充查询获取，GTPv2 状态码修正为 Cause=16。
 
-**最近更新**：2026-07-07 — 阶段十：信令协议接口-网元映射全面修正
+**最近更新**：2026-07-07 — 阶段十一：tshark JSON 输出修复 + 跨协议关联增强
 
 ---
 
@@ -216,11 +216,16 @@ MongoDB (历史指标) → aiops/aggregator.go (每小时聚合)
   - NAS: N1(UE↔AMF), S1-MME(UE↔MME)
   - SGsAP: SGs(MME↔MSC)
 
+tshark 查询策略（Phase 11 修复）：
+  - 不使用 -j 参数（-j 会导致协议子树被过滤为空，丢失 SIP Method/Status-Code 等字段）
+  - 使用 -2 两遍模式 + tcp.desegment_tcp_streams:TRUE + tcp.check_checksum:FALSE
+  - 主查询用 -T json 流式解析，补充查询用 -T fields 提取 Diameter AVP（Origin-Host/User-Name/Session-Id）
+  - SIP 字段通过 findInMap() 递归查找嵌套结构（sip.Request-Line_tree.sip.Method 等）
+
 已知限制：
-  - pcap 使用 Linux cooked-mode capture (sll)，tshark JSON 对 TCP 协议(SIP/Diameter)解析不完整
-  - SIP 的 method/status_code/direction 字段可能为空
-  - Diameter 的 IMSI/Origin-Host 等 AVP 未从 JSON 提取
-  - 跨协议关联(SIP↔Diameter)依赖 IMSI 标识提取，当前受限于 tshark JSON 输出
+  - pcap 使用 Linux cooked-mode capture (sll)，部分 TCP 协议解析仍有局限
+  - Diameter AVP 提取依赖 -T fields 补充查询（双查询开销）
+  - NAS 方向检测仍使用默认 "request"（需从 SCTP 端口判断）
 ```
 
 ### 外部数据集成

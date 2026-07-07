@@ -48,19 +48,17 @@
     - 前端 i18n 词条提取
     - Ladder Diagram 性能优化（>500 条消息时）
 
-- [ ] tshark JSON 对 TCP 协议解析问题
+- [x] tshark JSON 对 TCP 协议解析问题
 
-  - 背景：pcap 使用 Linux cooked-mode capture (sll)，tshark JSON 输出对 SIP/Diameter 等 TCP 协议解析不完整
-  - 影响：SIP 的 method/status_code/direction 字段为空，Diameter 的 IMSI/Origin-Host AVP 未提取
-  - 解决方案：改用 pcapng 格式捕获，或使用 tshark -T ek 格式，或解析原始包数据
-  - 验证方式：SIP 消息显示完整的 method/status_code/direction，Diameter 消息显示 IMSI 等标识
+  - 根因：tshark `-j` 参数导致输出过滤后的子树，丢失 SIP Method/Status-Code 等字段
+  - 修复：移除 `-j` 参数 + 添加 `-2` 两遍模式 + TCP 重组选项 + `-T fields` 补充 Diameter AVP
+  - 验证：SIP 286/288 消息有 Method，Diameter 7/7 有 Origin-Host
 
-- [ ] 跨协议关联逻辑完善（SIP↔Diameter 交互流）
+- [x] 跨协议关联逻辑完善（SIP↔Diameter 交互流）
 
-  - 背景：UE 注册流程涉及 Gm→Mw→Cx:UAR→Cx:SAR，需要关联 SIP 和 Diameter 消息
-  - 依赖：解决 tshark JSON TCP 协议解析问题后，才能提取 SIP URI/Call-ID 和 Diameter IMSI
-  - 关联链：Gm(UE→P-CSCF) → Mw(→I-CSCF) → Cx:UAR(I-CSCF→HSS) → Mw(→S-CSCF) → Cx:SAR(S-CSCF→HSS)
-  - 验证方式：追踪一个 UE 注册流程，Ladder Diagram 显示完整的 SIP+Diameter 交互
+  - 修复：CSeq method 提取 + checkIMSRegOK 兼容 cseq/cseq_method + checkCallOK 200 OK 匹配 INVITE
+  - 修复：GTPv2 状态码改为 Cause=16 + SUPI/IMSI 匹配增强 + UE IPv4 提取
+  - 待完善：SIP↔Diameter 交互流的端到端验证（需实际 VoLTE 呼叫测试）
 
 - [ ] IMS VoLTE 呼叫流程端到端验证
 
@@ -174,3 +172,5 @@
 - [x] HEPListener UDP 9060 监听 Kamailio siptrace（HEPv3 解析，50000 条缓冲区）
 - [x] IMSI 正则修复（支持 Open5GS MME 格式 `IMSI:[xxx]`）
 - [x] editcap 时间过滤 UTC bug 修复（改为本地时间）
+- [x] tshark JSON 输出修复：移除 `-j` 参数 + 添加 TCP 流重组选项 + `-T fields` 补充 Diameter AVP
+- [x] 跨协议关联增强：CSeq 提取 + GTPv2 Cause=16 + SUPI/IMSI 匹配 + UE IPv4 + checkCallOK 修复

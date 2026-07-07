@@ -235,7 +235,9 @@ func (h *Handler) runSignalingTrace(traceID string, req signalingTraceRequest) {
 		}
 	}
 
-	// 3. TsharkQuery — 从 pcap 环形缓冲区查询所有协议（兜底）
+	// 3. TsharkQuery — 从 pcap 环形缓冲区查询所有协议
+	//    HEP 有 SIP 数据时，tshark 补充非 SIP 协议（Diameter/GTPv2/PFCP/S1AP 等）
+	//    HEP 无数据时，tshark 全量查询
 	if h.TsharkQ != nil {
 		tqTimeRange := model.TimeRange{
 			Start: req.TimeRange.Start,
@@ -245,11 +247,23 @@ func (h *Handler) runSignalingTrace(traceID string, req signalingTraceRequest) {
 		if err != nil {
 			log.Printf("runSignalingTrace %s: tshark query: %v", traceID, err)
 		} else if len(msgs) > 0 {
+			// 如果 HEP 已有 SIP 数据，去重：跳过 tshark 中与 HEP 重复的 SIP 消息
+			hasHEPSIP := false
+			for _, m := range allMessages {
+				if m.Protocol == "SIP" {
+					hasHEPSIP = true
+					break
+				}
+			}
 			for i := range msgs {
 				msgs[i].TraceID = traceID
+				// HEP 已有 SIP 时，跳过 tshark 的 SIP 消息（避免重复）
+				if hasHEPSIP && msgs[i].Protocol == "SIP" {
+					continue
+				}
+				allMessages = append(allMessages, msgs[i])
 			}
-			allMessages = append(allMessages, msgs...)
-			log.Printf("runSignalingTrace %s: tshark query returned %d messages", traceID, len(msgs))
+			log.Printf("runSignalingTrace %s: tshark query returned %d messages (HEP SIP=%v)", traceID, len(msgs), hasHEPSIP)
 		} else {
 			log.Printf("runSignalingTrace %s: tshark query returned 0 messages", traceID)
 		}
@@ -291,11 +305,17 @@ func (h *Handler) runSignalingTrace(traceID string, req signalingTraceRequest) {
 		}
 	}
 
+	// 确定最终状态
+	status := "completed"
+	if len(allMessages) == 0 {
+		status = "no_data"
+	}
+
 	traceColl := h.Mongo.Database.Collection("signaling_traces")
 	traceColl.UpdateOne(ctx3,
 		bson.M{"trace_id": traceID},
 		bson.M{"$set": bson.M{
-			"status":        "completed",
+			"status":        status,
 			"message_count": len(allMessages),
 			"entities":      entities,
 			"time_range":    timeRange,
@@ -303,7 +323,7 @@ func (h *Handler) runSignalingTrace(traceID string, req signalingTraceRequest) {
 		}},
 	)
 
-	log.Printf("runSignalingTrace %s: completed, %d messages, %d entities", traceID, len(allMessages), len(entities))
+	log.Printf("runSignalingTrace %s: %s, %d messages, %d entities", traceID, status, len(allMessages), len(entities))
 }
 
 // -----------------------------------------------------------

@@ -407,6 +407,60 @@ Diameter: HSS → S-CSCF [Cx] (27), HSS → I-CSCF [Cx] (13)
 
 ---
 
+## 阶段十一：tshark JSON 输出修复 + 跨协议关联增强 (2026-07-07)
+
+**状态**: ✅ 已完成
+
+### 问题根因
+
+1. **`-j` 参数导致 SIP/Diameter 字段丢失** — tshark `-T json -j "sip diameter ..."` 会输出过滤后的子树（如 `{"filtered": "sip.Request-Line"}`），丢失 `sip.Method`、`sip.Status-Code`、`sip.from.user` 等关键字段
+2. **Diameter AVP 在 JSON 中不可访问** — `Origin-Host`、`User-Name`（IMSI）、`Session-Id` 等 AVP 在 `-T json` 输出中只有原始 hex，不作为独立 key
+3. **缺少 TCP 流重组选项** — 未使用 `-2`（两遍模式）和 `tcp.check_checksum:FALSE`
+4. **跨协议关联标识符未填充** — IMPU/IMPI/UE IPv4/SessionID 从未被任何解析器提取
+
+### 修复内容
+
+**tshark_query.go — 核心修复：**
+- 移除 `-j` 参数，恢复完整的协议树输出
+- 添加 `-2 -o tcp.desegment_tcp_streams:TRUE -o tcp.check_checksum:FALSE` 选项
+- 新增 `findInMap()` 递归查找函数，修复 SIP 字段访问路径
+- 新增 `runTsharkFields()` — 用 `-T fields` 补充 JSON 无法提取的 Diameter AVP
+- 新增 `supplementMessages()` — 按时间戳匹配合并 fields 数据到 JSON 解析结果
+- 新增 `extractIMSI()` — 从 SIP URI 提取 15 位 IMSI
+- `parseSIPFromLayers` 重写：使用 `findInMap` 递归查找 SIP 嵌套字段
+- `parseGTPv2FromLayers` 增强：提取 Cause 和 UE IPv4 (PAA)
+- 修复 `pfcp.message_type` → `pfcp.msg_type` 字段名错误
+- 清理死代码：删除 `tsharkJSONEntry`/`tsharkJSONSource`/`guessGTPv2Interface`
+
+**correlator.go — 关联增强：**
+- `checkIMSRegOK` 兼容 `cseq_method` 和 `cseq` 两种 detail key
+- `checkCallOK` 修复：200 OK 只匹配 INVITE 的 CSeq，避免误判
+- `checkSessionOK` 修复：GTPv2 成功改为 Cause=16（非 HTTP 200-299）
+- SUPI/IMSI 匹配增强：支持更多 MCC 前缀（460/417/310/262/208 等）
+
+**capture_daemon.go：**
+- 添加 `-o tcp.check_checksum:FALSE` 选项
+
+**handler/signaling.go：**
+- HEP 有 SIP 数据时，tshark 跳过 SIP 消息（避免重复）
+- 追踪状态增加 `no_data`（所有数据源返回 0 条消息时）
+
+### 验证结果
+
+```
+SIP: 286/288 消息有 Method（2 条响应只有 Status-Code，预期行为）
+Diameter: 7/7 消息有 Origin-Host（fields 补充）
+Fields supplement: 696 records merged into 295 messages
+```
+
+### 已知限制
+
+- `-T json` 对 Diameter AVP 的提取仍依赖 `-T fields` 补充（双查询开销）
+- NAS 方向检测仍使用默认 "request"（需从 SCTP 端口判断）
+- pcap 使用 sll 封装，部分 TCP 协议解析仍有局限
+
+---
+
 ## 当前状态总结
 
 | 项目 | 状态 | 说明 |

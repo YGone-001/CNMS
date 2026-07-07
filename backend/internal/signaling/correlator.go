@@ -99,11 +99,19 @@ func (c *Correlator) Correlate(messages []model.SignalingMessage) []model.Signal
 		if suPI, ok := supiIndex[imsi]; ok {
 			unionAll(uf, append(indices, suPI...))
 		}
-		// 去掉 3 位 MCC 前缀尝试
-		trimmed := trimPrefix(imsi, "999")
-		if trimmed != imsi {
-			if other, ok := imsiIndex[trimmed]; ok {
-				unionAll(uf, append(indices, other...))
+		// 去掉 3 位 MCC 前缀尝试（支持常见 MCC：460/417/310/262/208 等）
+		if len(imsi) > 3 {
+			mcc := imsi[:3]
+			for _, knownMCC := range []string{"999", "460", "417", "310", "311", "312", "262", "208", "234", "235", "440", "441", "450", "452", "520", "525"} {
+				if mcc == knownMCC {
+					trimmed := imsi[3:]
+					if trimmed != imsi {
+						if other, ok := imsiIndex[trimmed]; ok {
+							unionAll(uf, append(indices, other...))
+						}
+					}
+					break
+				}
 			}
 		}
 	}
@@ -429,11 +437,16 @@ func (c *Correlator) checkAuthOK(nas []model.SignalingMessage, diameter []model.
 
 // checkSessionOK 检查会话建立是否成功
 func (c *Correlator) checkSessionOK(gtp []model.SignalingMessage, pfcp []model.SignalingMessage, nas []model.SignalingMessage) bool {
-	// GTPv2-C: Create Session Response 成功
+	// GTPv2-C: Create Session Response 成功 (Cause=16: Request Accepted, 3GPP TS 29.274)
 	for _, m := range gtp {
 		if strings.Contains(strings.ToLower(m.Method), "create session") &&
 			strings.Contains(strings.ToLower(m.Method), "response") {
-			if m.StatusCode >= 200 && m.StatusCode < 300 || m.StatusCode == 0 {
+			cause := m.StatusCode
+			if v, ok := m.Details["cause"].(int); ok {
+				cause = v
+			}
+			// Cause=16 (Request Accepted) 或 Cause=0 (未解析) 视为成功
+			if cause == 16 || cause == 0 {
 				return true
 			}
 		}
@@ -467,11 +480,15 @@ func (c *Correlator) checkIMSRegOK(sip []model.SignalingMessage) bool {
 		}
 		// SIP 200 OK for REGISTER
 		if m.StatusCode == 200 {
-			// 检查是否是 REGISTER 的 200 OK
-			if details, ok := m.Details["cseq_method"].(string); ok {
-				if strings.EqualFold(details, "REGISTER") {
-					return true
-				}
+			// 检查 CSeq method 是否为 REGISTER（兼容两种 detail key）
+			cseqMethod := ""
+			if v, ok := m.Details["cseq_method"].(string); ok {
+				cseqMethod = v
+			} else if v, ok := m.Details["cseq"].(string); ok {
+				cseqMethod = v
+			}
+			if strings.EqualFold(cseqMethod, "REGISTER") {
+				return true
 			}
 			// 或者检查消息上下文中有 REGISTER
 			if hasRegister {
@@ -485,7 +502,7 @@ func (c *Correlator) checkIMSRegOK(sip []model.SignalingMessage) bool {
 // checkCallOK 检查 VoLTE/VoNR 呼叫是否成功
 func (c *Correlator) checkCallOK(sip []model.SignalingMessage) bool {
 	hasInvite := false
-	has200OK := false
+	hasInvite200OK := false
 	hasCancel := false
 
 	for _, m := range sip {
@@ -495,22 +512,29 @@ func (c *Correlator) checkCallOK(sip []model.SignalingMessage) bool {
 		case "CANCEL":
 			hasCancel = true
 		}
-		if m.StatusCode == 200 {
-			has200OK = true
+
+		// 获取 CSeq method（兼容两种 detail key）
+		cseqMethod := ""
+		if v, ok := m.Details["cseq_method"].(string); ok {
+			cseqMethod = v
+		} else if v, ok := m.Details["cseq"].(string); ok {
+			cseqMethod = v
 		}
-		// 4xx/5xx/6xx 表示呼叫失败
+
+		// 200 OK for INVITE = 呼叫建立成功
+		if m.StatusCode == 200 && strings.EqualFold(cseqMethod, "INVITE") {
+			hasInvite200OK = true
+		}
+		// 4xx/5xx/6xx for INVITE = 呼叫失败
 		if m.StatusCode >= 400 && m.StatusCode < 700 {
-			// 如果是 INVITE 的错误响应
-			if cseqMethod, ok := m.Details["cseq_method"].(string); ok {
-				if strings.EqualFold(cseqMethod, "INVITE") {
-					return false
-				}
+			if strings.EqualFold(cseqMethod, "INVITE") {
+				return false
 			}
 		}
 	}
 
-	// INVITE + 200 OK = 呼叫建立成功
-	if hasInvite && has200OK && !hasCancel {
+	// INVITE + 200 OK for INVITE = 呼叫建立成功
+	if hasInvite && hasInvite200OK && !hasCancel {
 		return true
 	}
 

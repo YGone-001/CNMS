@@ -139,6 +139,7 @@ func (d *CaptureDaemon) startTshark() error {
 		"-w", filePattern,
 		"-f", d.cfg.BPFFilter,
 		"-q",
+		"-o", "tcp.check_checksum:FALSE", // 忽略校验和（Linux offload 常导致校验和错误）
 	}
 
 	cmd := exec.CommandContext(ctx, "tshark", args...)
