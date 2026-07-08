@@ -8,9 +8,10 @@ import {
   Link2,
   Layers,
   Info,
+  Database,
 } from 'lucide-react';
 import type { SignalingMessage, SignalingProtocol } from '@/types/signaling';
-import { PROTOCOL_TEXT_COLORS } from '@/types/signaling';
+import { PROTOCOL_TEXT_COLORS, DATA_SOURCE_LABELS } from '@/types/signaling';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -399,6 +400,24 @@ function MessageDetailInner({ message, onClose, onNavigate }: MessageDetailProps
         )}
         {/* Timestamp */}
         <span className="text-noc-muted ml-auto">{formatTimestamp(message.timestamp)}</span>
+        {/* Data source badge */}
+        {message.data_source && (() => {
+          const ds = DATA_SOURCE_LABELS[message.data_source];
+          return ds ? (
+            <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] rounded border ${ds.color}`}>
+              {message.data_source === 'hep' && <Layers className="w-2.5 h-2.5" />}
+              {message.data_source === 'hep_mongo' && <Database className="w-2.5 h-2.5" />}
+              {ds.zh}
+            </span>
+          ) : null;
+        })()}
+        {/* Cross-layer indicator */}
+        {message.cross_layer && (
+          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] rounded border bg-amber-500/20 text-amber-400 border-amber-500/30" title="Cross-layer correlated (SIP <-> NAS/S1AP)">
+            <Link2 className="w-2.5 h-2.5" />
+            Cross
+          </span>
+        )}
       </div>
 
       {/* Tabs */}

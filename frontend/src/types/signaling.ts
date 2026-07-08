@@ -96,6 +96,10 @@ export interface SignalingMessage {
   raw_preview?: string;
   session_id?: string;
   call_id?: string;
+  /** data source: hep (L1 ring), hep_mongo (L2 overflow), tshark, homer */
+  data_source?: 'hep' | 'hep_mongo' | 'tshark' | 'homer';
+  /** whether this message was cross-layer correlated (SIP <-> NAS/S1AP) */
+  cross_layer?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -207,6 +211,31 @@ export interface MediaListResponse {
   page: number;
   per_page: number;
 }
+
+// ---------------------------------------------------------------------------
+// HEP Listener Status (two-tier ring buffer)
+// ---------------------------------------------------------------------------
+
+export interface HepStatus {
+  status: string;
+  enabled: boolean;
+  running?: boolean;
+  listen_addr?: string;
+  received?: number;
+  parsed?: number;
+  errors?: number;
+  buffer_count?: number;
+  last_receive?: string;
+  message?: string;
+}
+
+/** Data source labels */
+export const DATA_SOURCE_LABELS: Record<string, { zh: string; en: string; color: string }> = {
+  hep:        { zh: 'HEP L1', en: 'HEP L1',     color: 'bg-green-500/20 text-green-400 border-green-500/30' },
+  hep_mongo:  { zh: 'HEP L2', en: 'HEP L2',     color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' },
+  tshark:     { zh: 'Pcap',   en: 'Pcap',       color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
+  homer:      { zh: 'Homer',  en: 'Homer',      color: 'bg-purple-500/20 text-purple-400 border-purple-500/30' },
+};
 
 // ---------------------------------------------------------------------------
 // Constants

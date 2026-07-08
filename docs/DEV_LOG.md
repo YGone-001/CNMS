@@ -461,6 +461,92 @@ Fields supplement: 696 records merged into 295 messages
 
 ---
 
+## 阶段十二：信令追踪模块深度优化 (2026-07-08)
+
+**状态**: ✅ 已完成
+
+### 目标
+
+解决信令追踪模块三大核心问题：HEP3 解析失败、IMSI 过滤覆盖不全、SIP 与 NAS/S1AP 信令断层。
+
+### 已完成内容
+
+**1. HEP3 解析器修复 (`hep_listener.go`)**
+
+- Chunk 头从 4 字节改为 6 字节（vendor_id + type_id + length），匹配 Kamailio 实现
+- 修正 chunk type 常量映射：0x0002=IPProto, 0x0003=SrcIP4, 0x0004=DstIP4, 0x0007=SrcPort, 0x0008=DstPort, 0x000b=ProtoType, 0x000f=Payload
+- 验证：`received=1, parsed=1, errors=0`
+
+**2. 复合 IMSI 过滤器 (`tshark_query.go`)**
+
+- 新增 `BuildTsharkFilter()` 公开接口
+- 新增 `buildIMSIFilter()` — 覆盖 4G/5G 全协议的复合显示过滤器
+  - `e212.imsi` — 跨协议统一字段（GTPv2/GTP/Diameter/NAS-EPS/S1AP）
+  - `diameter.User-Name` — Diameter Cx/Dx/S6a 接口
+  - `nas_5gs.mm.suci.msin` — 5G NAS SUCI 中的 MSIN 部分
+  - `frame contains` — SIP URI 中内嵌 IMSI 兜底
+- 新增 `extractMSIN()` — 从 IMSI 提取 MSIN（去掉 MCC+MNC）
+- 新增 `buildProtocolFilter()` — per-protocol 回退查询协议组
+
+**3. SIP URI IMSI 正则提取 (`tshark_query.go`)**
+
+- 新增 `reSIPURIImsi` 正则 — 匹配 `sip:15位数字@` 格式
+- 新增 `extractIMSIFromSIPURI()` — 从 SIP URI 正则提取明文 IMSI
+- `parseSIPFromLayers` 增强：新增 `sip.from.uri` / `sip.to.uri` 递归查找
+- `runTsharkFields` 增强：新增 `-e sip.from.uri` / `-e sip.to.uri` / `-e s1ap.iMSI` / `-e e212.imsi` / `-e nas_5gs.mm.suci.msin`
+- `fieldsRecord` 新增 `SIPFromURI` / `SIPToURI` / `S1APIMSI` / `E212IMSI` / `NAS5GSMSIN` 字段
+- `supplementMessages` 增强：GTPv2/S1AP/NAS-EPS/NAS-5GS 从 fields 补充 IMSI
+
+**4. 跨层身份关联 (`correlator.go`)**
+
+- 新增 `mergeCrossLayerIdentity()` — Identity Context Tree 跨层合并
+- 算法：从 SIP 消息提取 Call-ID → IMSI 映射，将 IMSI 组（S1AP/NAS/GTP）与 Call-ID 组（SIP）在 Union-Find 中合并
+- 关联规则 7：解决 SIP REGISTER 与 S1AP Attach 信令断层问题
+
+**5. 两级缓存架构 (`hep_listener.go`)**
+
+- 新增 `ringBuffer` 结构体 — 无锁环形缓冲区（atomic.Pointer + atomic.Int64）
+- 新增 `overflowWorker()` — 异步批量刷盘 worker（200条/批 或 5秒定时）
+- 新增 MongoDB overflow 集合 `hep_ring_overflow`（TTL 7天）
+- 查询方法重构：`QueryByIMSI`/`QueryByCallID`/`QueryAll` 合并 L1（ring buffer）+ L2（MongoDB）
+- 新增 `mergeMessages()` — timestamp 去重 + 排序
+- 新增 `EnsureIndexes()` — 创建 TTL 和查询索引
+
+**6. 前端适配**
+
+- `types/signaling.ts`：新增 `data_source` / `cross_layer` 字段、`HepStatus` 接口、`DATA_SOURCE_LABELS` 常量
+- `pages/SignalingTrace.tsx`：
+  - 新增 `HepStatusBadge` 组件（标题栏 HEP 在线状态指示器）
+  - 新增 `DataSourceBadge` 组件（消息表格数据源标签）
+  - 新增 `fetchHepStatus()` API 调用
+  - 修复默认时间范围时区问题（`toISOString` → `formatLocalDatetime`）
+- `components/MessageDetail.tsx`：
+  - 新增数据源徽章（header 区域）
+  - 新增跨层关联指示器（琥珀色 `Cross` 标签）
+
+### 修改文件
+
+| 文件 | 变更类型 | 说明 |
+|------|----------|------|
+| `backend/internal/signaling/hep_listener.go` | 重写 | HEP3 解析 + 两级缓存架构 |
+| `backend/internal/signaling/tshark_query.go` | 增强 | 复合 IMSI 过滤 + SIP URI 正则 + fields 补充 |
+| `backend/internal/signaling/correlator.go` | 增强 | Identity Context Tree 跨层关联 |
+| `frontend/src/types/signaling.ts` | 增强 | data_source/cross_layer/HepStatus |
+| `frontend/src/pages/SignalingTrace.tsx` | 增强 | HEP 状态 + 数据源标签 + 时区修复 |
+| `frontend/src/components/MessageDetail.tsx` | 增强 | 数据源 + 跨层标识 |
+
+### 验证结果
+
+```
+HEPListener: received=3087, parsed=3087, errors=0, buffer_count=3087
+HEP Status: enabled=true, running=true, listen_addr=:9060
+复合 IMSI 过滤器: e212.imsi || diameter.User-Name || nas_5gs.mm.suci.msin || frame contains
+跨层关联: Call-ID → IMSI 映射 → IMSI组 ∪ Call-ID组 合并
+两级缓存: L1 ring buffer (atomic) + L2 MongoDB overflow (batch insert)
+```
+
+---
+
 ## 当前状态总结
 
 | 项目 | 状态 | 说明 |
@@ -471,17 +557,27 @@ Fields supplement: 696 records merged into 295 messages
 | IMS 配置 | 🔄 调优中 | P/S/I-CSCF 已配置，持续优化 |
 | 一键抓包 | ✅ 已完成 | tcpdump 管理、12 种协议预设、WebSocket 实时进度 |
 | 信令持续抓包 | ✅ 已完成 | CaptureDaemon tshark 环形缓冲区 + TsharkQuery 查询引擎 |
-| HEP 监听 | ✅ 已完成 | UDP 9060 接收 Kamailio siptrace，50000 条缓冲区 |
-| 信令追踪 | ✅ 已完成 | 三级数据源 + Union-Find 关联 + Ladder Diagram |
+| HEP 监听 | ✅ 已完成 | UDP 9060 接收 Kamailio siptrace，两级缓存（L1 ring + L2 MongoDB） |
+| 信令追踪 | ✅ 已完成 | 三级数据源 + Union-Find 关联 + Identity Context Tree 跨层合并 |
 | 协议接口映射 | ✅ 已修正 | Diameter/SIP/GTPv2/PFCP/S1AP/NGAP/NAS/SGsAP 全面修正 |
+| IMSI 过滤 | ✅ 已完成 | 复合过滤器覆盖 e212.imsi/diameter.User-Name/nas_5gs.mm.suci.msin |
+| 跨层关联 | ✅ 已完成 | SIP ↔ NAS/S1AP 通过 Call-ID → IMSI 映射桥接 |
 
-### 信令数据源架构（2026-07-07 更新）
+### 信令数据源架构（2026-07-08 更新）
 
 ```
-优先级 1: Kamailio → HEPv3 → :9060/udp → HEPListener → SIP 消息缓冲区
+优先级 1: Kamailio → HEPv3 → :9060/udp → HEPListener
+           ├─ L1: 无锁环形缓冲区 (50000 条, atomic)
+           └─ L2: MongoDB overflow (hep_ring_overflow, TTL 7天)
+
 优先级 2: Homer API → 已存储的 SIP 消息（HEP 无数据时）
+
 优先级 3: tshark 持续抓包 → /var/spool/xcloud/signaling/ring_*.pcap → TsharkQuery
-           → frame contains "IMSI值" 精确匹配（非无过滤全量查询）
+           → 复合 IMSI 过滤器 (e212.imsi || diameter.User-Name || nas_5gs.mm.suci.msin || frame contains)
+
+跨层关联: mergeCrossLayerIdentity (Identity Context Tree)
+           SIP (Call-ID + IMSI from URI) ↔ NAS/S1AP/GTP (e212.imsi)
+           通过 Call-ID → IMSI 映射在 Union-Find 中合并
 ```
 
 ### 配置项（config.json）

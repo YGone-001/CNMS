@@ -175,6 +175,16 @@ func (c *Correlator) Correlate(messages []model.SignalingMessage) []model.Signal
 		unionAll(uf, indices)
 	}
 
+	// 规则 7: Identity Context Tree — 跨层关联 (SIP ↔ NAS/S1AP/GTP)
+	//
+	// 问题: SIP REGISTER 携带 Call-ID + SIP URI (内嵌 IMSI)，
+	// 但 S1AP/NAS/GTP 携带 e212.imsi 却没有 Call-ID。
+	// 两层消息各自形成独立的关联组，无法合并为完整信令流程。
+	//
+	// 方案: 从 SIP 消息中提取 Call-ID → IMSI 映射，
+	// 再用该映射将 IMSI 组与 Call-ID 组在 Union-Find 中合并。
+	mergeCrossLayerIdentity(uf, messages, imsiIndex, callIDIndex)
+
 	// 从 UF 组中确定每个消息的 TraceID
 	// 策略：用组中第一条消息的 TraceID 作为组的 TraceID
 	groupTraceID := make(map[int]string) // root → traceID
@@ -661,5 +671,68 @@ func unionAll(uf *unionFind, indices []int) {
 	}
 	for i := 1; i < len(indices); i++ {
 		uf.union(indices[0], indices[i])
+	}
+}
+
+// mergeCrossLayerIdentity 通过 Identity Context Tree 实现 SIP ↔ NAS/S1AP/GTP 跨层关联。
+//
+// 信令断层场景:
+//   EPC Attach 阶段: S1AP/NAS 消息携带 e212.imsi，但无 Call-ID
+//   IMS Register 阶段: SIP REGISTER 携带 Call-ID + SIP URI (内嵌 IMSI)
+//   两层消息在 Union-Find 中形成独立组，无法合并为完整流程
+//
+// 算法:
+//  1. 遍历 SIP 消息，提取同时拥有 Call-ID 和 IMSI 的消息，建立 Call-ID → IMSI 映射
+//  2. 对每个映射条目，将 IMSI 索引中的消息与 Call-ID 索引中的消息在 UF 中合并
+//  3. 同时支持反向: 若 SIP 消息只有 Call-ID 无 IMSI，但同 Call-ID 的其他消息有 IMSI，也能关联
+//
+// 这样底层 (S1AP/NAS/GTP with IMSI) 和 SIP 层 (with Call-ID) 通过共享 IMSI 桥接。
+func mergeCrossLayerIdentity(uf *unionFind, messages []model.SignalingMessage,
+	imsiIndex map[string][]int, callIDIndex map[string][]int) {
+
+	// Step 1: 从 SIP 消息中构建 Call-ID → IMSI 映射 (Identity Context Tree)
+	//
+	// 一个 IMSI 可能对应多个 Call-ID (多并发会话)，
+	// 一个 Call-ID 只对应一个 IMSI (会话绑定)。
+	callIDToIMSI := make(map[string]string)
+	for _, indices := range callIDIndex {
+		for _, idx := range indices {
+			m := messages[idx]
+			imsi := m.Identifiers.IMSI
+			if imsi == "" {
+				continue
+			}
+			cid := m.Identifiers.CallID
+			if cid == "" {
+				cid = m.CallID
+			}
+			if cid != "" {
+				callIDToIMSI[cid] = imsi
+			}
+		}
+	}
+
+	if len(callIDToIMSI) == 0 {
+		return
+	}
+
+	// Step 2: 用映射合并 IMSI 组与 Call-ID 组
+	merged := 0
+	for cid, imsi := range callIDToIMSI {
+		imIndices, imsiOK := imsiIndex[imsi]
+		cidIndices, cidOK := callIDIndex[cid]
+		if !imsiOK || !cidOK {
+			continue
+		}
+		// 合并 IMSI 组 (S1AP/NAS/GTP) + Call-ID 组 (SIP)
+		combined := make([]int, 0, len(imIndices)+len(cidIndices))
+		combined = append(combined, imIndices...)
+		combined = append(combined, cidIndices...)
+		unionAll(uf, combined)
+		merged++
+	}
+
+	if merged > 0 {
+		log.Printf("Correlate: cross-layer identity merged %d Call-ID/IMSI bridges", merged)
 	}
 }

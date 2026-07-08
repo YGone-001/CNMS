@@ -13,6 +13,9 @@ import {
   Search,
   Filter,
   AlertTriangle,
+  Database,
+  Layers,
+  Radio,
 } from 'lucide-react';
 import { useI18n } from '@/i18nContext';
 import { authFetch } from '@/App';
@@ -26,6 +29,7 @@ import type {
   TraceScenario,
   TraceStatus,
   SignalingProtocol,
+  HepStatus,
 } from '@/types/signaling';
 import {
   PROTOCOL_COLORS,
@@ -34,6 +38,7 @@ import {
   QUERY_TYPE_OPTIONS,
   SCENARIO_OPTIONS,
   SUMMARY_STEPS,
+  DATA_SOURCE_LABELS,
 } from '@/types/signaling';
 
 // ---------------------------------------------------------------------------
@@ -89,8 +94,68 @@ class SignalingErrorBoundary extends Component<
 }
 
 // ---------------------------------------------------------------------------
+// HEP Status Badge — shows L1 ring buffer + L2 overflow stats
+// ---------------------------------------------------------------------------
+
+function HepStatusBadge({ status, isZh }: { status: HepStatus; isZh: boolean }) {
+  if (!status.running) {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-red-500/10 border border-red-500/30 text-red-400">
+        <Radio className="w-3 h-3" />
+        HEP {isZh ? '离线' : 'Offline'}
+      </span>
+    );
+  }
+
+  const bufCount = status.buffer_count || 0;
+  const received = status.received || 0;
+  const parsed = status.parsed || 0;
+
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 px-2 py-0.5 text-xs rounded-full bg-green-500/10 border border-green-500/30 text-green-400 cursor-help"
+      title={[
+        `L1 Ring: ${bufCount} msgs`,
+        `Received: ${received}`,
+        `Parsed: ${parsed}`,
+        `Errors: ${status.errors || 0}`,
+        status.listen_addr ? `Addr: ${status.listen_addr}` : '',
+      ].filter(Boolean).join('\n')}
+    >
+      <Radio className="w-3 h-3 animate-pulse" />
+      HEP {isZh ? '在线' : 'Live'}
+      <span className="text-green-300/70">L1:{bufCount}</span>
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Data Source Badge — indicates where the message came from
+// ---------------------------------------------------------------------------
+
+function DataSourceBadge({ source }: { source?: string }) {
+  if (!source) return null;
+  const label = DATA_SOURCE_LABELS[source];
+  if (!label) return null;
+
+  return (
+    <span className={`inline-flex items-center gap-0.5 px-1.5 py-0 text-[10px] rounded border ${label.color}`}>
+      {source === 'hep' && <Layers className="w-2.5 h-2.5" />}
+      {source === 'hep_mongo' && <Database className="w-2.5 h-2.5" />}
+      {label.zh}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** Format Date as local datetime-local input value (YYYY-MM-DDTHH:mm) */
+function formatLocalDatetime(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 function formatTime(ts: string): string {
   if (!ts) return '-';
@@ -161,13 +226,13 @@ function SignalingTrace() {
   const [scenario, setScenario] = useState<TraceScenario>('all');
   const [timeStart, setTimeStart] = useState(() => {
     const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    return d.toISOString().slice(0, 16);
+    d.setHours(9, 0, 0, 0);
+    return formatLocalDatetime(d);
   });
   const [timeEnd, setTimeEnd] = useState(() => {
     const d = new Date();
-    d.setHours(23, 59, 59, 0);
-    return d.toISOString().slice(0, 16);
+    d.setHours(19, 0, 0, 0);
+    return formatLocalDatetime(d);
   });
   const [sources] = useState<string[]>(['logs', 'pcap']);
 
@@ -185,6 +250,9 @@ function SignalingTrace() {
   const [msgPage, setMsgPage] = useState(1);
   const [msgTotal, setMsgTotal] = useState(0);
   const msgPageSize = 100;
+
+  // --- HEP status (two-tier ring buffer) ---
+  const [hepStatus, setHepStatus] = useState<HepStatus | null>(null);
 
   // --- UI state ---
   const [creating, setCreating] = useState(false);
@@ -231,6 +299,20 @@ function SignalingTrace() {
       setTracesLoading(false);
     }
   }, [tracesPage]);
+
+  // ---------------------------------------------------------------------------
+  // API: fetch HEP listener status (two-tier ring buffer)
+  // ---------------------------------------------------------------------------
+  const fetchHepStatus = useCallback(async () => {
+    try {
+      const resp = await authFetch('/api/v1/signaling/hep/status');
+      if (!resp.ok) return;
+      const data = await resp.json();
+      setHepStatus(data as HepStatus);
+    } catch {
+      // non-critical, silently ignore
+    }
+  }, []);
 
   // ---------------------------------------------------------------------------
   // API: fetch single trace status (polling)
@@ -436,11 +518,12 @@ function SignalingTrace() {
   // ---------------------------------------------------------------------------
   useEffect(() => {
     fetchTraces();
+    fetchHepStatus();
     return () => {
       if (pollTimer.current) clearTimeout(pollTimer.current);
       if (toastTimer.current) clearTimeout(toastTimer.current);
     };
-  }, [fetchTraces]);
+  }, [fetchTraces, fetchHepStatus]);
 
   // ---------------------------------------------------------------------------
   // Derived: filtered messages by protocol (client-side for current page)
@@ -493,6 +576,10 @@ function SignalingTrace() {
             <span className="text-xs text-noc-muted bg-noc-bg-50 px-2 py-0.5 rounded-full">
               {tracesTotal} {isZh ? '条记录' : 'traces'}
             </span>
+          )}
+          {/* HEP two-tier ring buffer status */}
+          {hepStatus?.enabled && (
+            <HepStatusBadge status={hepStatus} isZh={isZh} />
           )}
         </div>
         {/* Scenario quick buttons */}
@@ -921,6 +1008,7 @@ function SignalingTrace() {
                           >
                             {msg.protocol}
                           </span>
+                          <DataSourceBadge source={msg.data_source} />
                         </td>
                         <td className="px-3 py-2 text-noc-muted">
                           {msg.interface}

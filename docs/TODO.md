@@ -24,7 +24,7 @@
 
 - [x] 信令追踪模块完善
 
-  - Phase 7-10 已完成，架构重构为 tshark 持续抓包 + HEP 监听 + 协议接口映射修正
+  - Phase 7-12 已完成，架构重构为 tshark 持续抓包 + HEP 监听 + 两级缓存 + 跨层关联
   - 已完成：
     - ✅ 白屏修复（ErrorBoundary + 空值安全）
     - ✅ 移除日志扫描，改为底层真实信令捕获
@@ -32,18 +32,20 @@
     - ✅ TsharkQuery 从 pcap 按 IMSI/SIP/TEID 等条件查询
     - ✅ HEPListener UDP 9060 监听 Kamailio siptrace
     - ✅ 三级数据源优先级：HEP → Homer → tshark
-    - ✅ tshark 查询优化：frame contains IMSI 精确匹配（非无过滤全量查询）
+    - ✅ 复合 IMSI 过滤器（e212.imsi + diameter.User-Name + nas_5gs.mm.suci.msin + frame contains）
+    - ✅ SIP URI IMSI 正则提取（sip:15位数字@）
+    - ✅ Identity Context Tree 跨层关联（SIP ↔ NAS/S1AP 通过 Call-ID → IMSI 映射）
+    - ✅ 两级缓存架构（L1 无锁 ring buffer + L2 MongoDB overflow）
     - ✅ Diameter 接口映射修正（Cx/S6a/Sh/Rx/Gx/N7/SWx/S6b/Gxx/S13/Base）
     - ✅ Diameter 网元推断（根据 App-ID + 命令码区分 I-CSCF/S-CSCF/HSS）
     - ✅ SIP 接口映射修正（Gm=UE↔P-CSCF, Mw=P-CSCF↔I-CSCF, ISC=S-CSCF↔AS）
     - ✅ GTPv2C/PFCP/S1AP/NGAP/NAS/SGsAP 方向检测和接口映射
+    - ✅ 前端 HEP 状态指示器 + 数据源标签 + 跨层关联标识
   - 已知限制：
     - pcap 使用 sll 封装，tshark JSON 对 TCP 协议解析不完整
     - SIP 的 method/status_code/direction 字段可能为空
-    - 跨协议关联(SIP↔Diameter)受限于 IMSI 标识提取
+    - 5G NAS SUCI 加密场景下 IMSI 无法从 NAS 层提取
   - 待完善：
-    - 解决 tshark JSON 对 TCP 协议(SIP/Diameter)解析不完整问题
-    - 跨协议关联逻辑（SIP↔Diameter 交互流：Gm→Mw→Cx:UAR→Cx:SAR）
     - OpenAPI 文档补丁（swagger.go 未更新）
     - 前端 i18n 词条提取
     - Ladder Diagram 性能优化（>500 条消息时）

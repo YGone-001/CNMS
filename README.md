@@ -75,8 +75,10 @@ xCloud-CNMS 是一个专业的 4G/5G/IMS 核心网监控管理平台，面向电
 ### 🔍 信令追踪
 - 三级数据源：HEPListener（Kamailio HEP 推送）→ Homer API → tshark pcap 环形缓冲区
 - 信令持续抓包（tshark 环形缓冲区 20×100MB，BPF 信令协议过滤，崩溃自动重启）
-- HEP 监听器（UDP 9060 接收 Kamailio siptrace，HEPv3 解析，50000 条环形缓冲区）
-- 跨协议关联引擎（Union-Find 10 维标识：IMSI/SUPI/MSISDN/TEID/UE IP 等）
+- HEP 监听器（UDP 9060 接收 Kamailio siptrace，HEPv3 解析，两级缓存：L1 无锁 ring buffer + L2 MongoDB overflow）
+- 复合 IMSI 过滤器（e212.imsi + diameter.User-Name + nas_5gs.mm.suci.msin + frame contains，覆盖 4G/5G 全协议）
+- 跨层身份关联（Identity Context Tree：SIP ↔ NAS/S1AP 通过 Call-ID → IMSI 映射桥接）
+- 跨协议关联引擎（Union-Find 10 维标识 + 7 条关联规则）
 - Ladder Diagram 梯形时序图（纯 SVG，虚拟滚动，协议着色，错误标记）
 - 消息详情面板（按协议类型展示不同字段，SDP 解析，原始数据预览）
 - 媒体质量展示（MOS 仪表盘、丢包/抖动/RTD 指标、rtpengine 中继映射）

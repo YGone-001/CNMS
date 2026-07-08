@@ -196,13 +196,18 @@ backend/
 
 **数据源（三级优先）：**
 - **hep_listener**: UDP 9060 监听 Kamailio siptrace HEPv3 数据（优先，性能最好）
+  - L1: 无锁环形缓冲区（50000 条，atomic.Pointer + atomic.Int64）
+  - L2: MongoDB overflow 集合 `hep_ring_overflow`（TTL 7 天，异步批量写入）
 - **hep**: Homer API 客户端，查询已存储的 SIP 消息（辅助）
 - **tshark_query**: 从 tshark 环形缓冲区 pcap 按条件查询全协议（兜底）
+  - 复合 IMSI 过滤器：`e212.imsi || diameter.User-Name || nas_5gs.mm.suci.msin || frame contains`
 - **capture_daemon**: tshark 持续抓包守护进程，环形缓冲区 20×100MB
 
 **关联引擎：**
 - **correlator**: Union-Find 跨协议关联引擎
   - 10 维标识关联（IMSI/SUPI/MSISDN/SIP URI/TEID/UE IP/Call-ID 等）
+  - 7 条关联规则（IMSI/SUPI → MSISDN/SIP URI → Call-ID → TEID → UE IP → Session ID → Identity Context Tree）
+  - Identity Context Tree 跨层关联：SIP (Call-ID + IMSI from URI) ↔ NAS/S1AP/GTP (e212.imsi)
   - 网元排序（按 3GPP 架构顺序：UE→gNB→AMF→HSS→SGW→PGW→P-CSCF→S-CSCF）
   - 摘要生成（注册/鉴权/会话/IMS 注册/通话/短信各环节成功/失败判断）
 
@@ -210,11 +215,11 @@ backend/
 
 | 优先级 | 来源 | 说明 | 协议覆盖 |
 |--------|------|------|----------|
-| 1 | HEPListener | Kamailio siptrace → :9060/udp → HEPv3 解析 | SIP |
+| 1 | HEPListener | Kamailio siptrace → :9060/udp → HEPv3 解析 → L1 ring + L2 MongoDB | SIP |
 | 2 | Homer API | 查询 Homer 已存储数据 | SIP |
-| 3 | TsharkQuery | 环形缓冲区 pcap → editcap + mergecap + tshark | S1AP/NGAP/SIP/Diameter/GTPv2C/PFCP/NAS/SGsAP |
+| 3 | TsharkQuery | 环形缓冲区 pcap → 复合 IMSI 过滤器 → tshark | S1AP/NGAP/SIP/Diameter/GTPv2C/PFCP/NAS/SGsAP |
 
-**处理流程:** 创建 Trace → HEPListener 查询 SIP → Homer API 查询 → TsharkQuery pcap 查询 → Union-Find 跨协议关联 → 摘要生成 → 批量写入 MongoDB
+**处理流程:** 创建 Trace → HEPListener 查询 SIP (L1 ring + L2 MongoDB) → Homer API 查询 → TsharkQuery pcap 查询（复合 IMSI 过滤） → Union-Find 跨协议关联（含 Identity Context Tree 跨层合并） → 摘要生成 → 批量写入 MongoDB
 
 #### 7. WebSocket 模块
 

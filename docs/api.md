@@ -1195,15 +1195,15 @@ GET /api/v1/capture/presets
 
 ### 信令追踪
 
-信令追踪模块提供跨协议信令关联分析能力。创建追踪后，后台异步从多个日志源采集数据，解析提取消息，通过 Union-Find 引擎关联，最终生成梯形时序图和成功/失败摘要。
+信令追踪模块提供跨协议信令关联分析能力。创建追踪后，后台异步从多个日志源采集数据，解析提取消息，通过 Union-Find 引擎关联（含 Identity Context Tree 跨层合并），最终生成梯形时序图和成功/失败摘要。
 
 #### 数据来源（优先级）
 
 | 优先级 | 来源 | 说明 | IMSI 提取方式 |
 |--------|------|------|--------------|
-| 1 | HEPListener | Kamailio siptrace 通过 HEPv3 推送到 :9060/udp | SIP URI 中的 IMSI |
+| 1 | HEPListener | Kamailio siptrace 通过 HEPv3 推送到 :9060/udp（L1 ring + L2 MongoDB） | SIP URI 中的 IMSI（正则提取） |
 | 2 | Homer API | 从 Homer 查询已存储的 SIP 消息 | SIP 消息中的 IMSI |
-| 3 | TsharkQuery | 从 tshark 环形缓冲区 pcap 查询全协议 | `gtpv2.imsi`/`e212.imsi` + SIP URI |
+| 3 | TsharkQuery | 从 tshark 环形缓冲区 pcap 查询（复合 IMSI 过滤器） | `e212.imsi` + `diameter.User-Name` + `nas_5gs.mm.suci.msin` + SIP URI |
 
 #### 创建追踪任务
 
@@ -1423,13 +1423,14 @@ GET /api/v1/signaling/homer/status
 ```
 用户输入 IMSI → POST /signaling/trace → 创建 trace (status=running)
     ↓ 异步 goroutine (5 分钟超时)
-    ├─ [优先] HEPListener.QueryByIMSI() — 从 HEP 缓冲区查询 SIP 消息
+    ├─ [优先] HEPListener.QueryByIMSI() — 从 L1 ring + L2 MongoDB 查询 SIP 消息
     ├─ [辅助] h.Homer.Search() — 从 Homer API 查询（HEP 无数据时）
-    └─ [兜底] TsharkQuery.Query() — 从环形缓冲区 pcap 查询全协议
+    └─ [兜底] TsharkQuery.Query() — 从环形缓冲区 pcap 查询（复合 IMSI 过滤器）
         ├─ editcap 时间裁剪 → mergecap 合并
-        ├─ tshark -Y 显示过滤（IMSI 匹配）
-        └─ 无结果时回退全量查询（S1AP/SIP/Diameter 不携带 IMSI）
-    ↓ Union-Find 跨协议关联 (10 维标识)
+        ├─ tshark -Y 复合显示过滤: e212.imsi || diameter.User-Name || nas_5gs.mm.suci.msin || frame contains
+        └─ 无结果时回退 per-protocol 查询
+    ↓ Union-Find 跨协议关联 (10 维标识 + 7 条规则)
+    ↓ Identity Context Tree 跨层合并 (SIP ↔ NAS/S1AP via Call-ID → IMSI)
     ↓ 摘要生成 (6 项成功/失败判定)
     ↓ 批量写入 signaling_messages + 更新 trace (status=completed)
 ```
@@ -1448,13 +1449,31 @@ GET /api/v1/signaling/hep/status
   "enabled": true,
   "running": true,
   "listen_addr": ":9060",
-  "received": 12345,
-  "parsed": 12000,
-  "errors": 345,
-  "buffer_count": 8000,
-  "last_receive": "2026-07-06T18:00:00+08:00"
+  "received": 3087,
+  "parsed": 3087,
+  "errors": 0,
+  "buffer_count": 3087,
+  "last_receive": "2026-07-08T16:03:35+08:00"
 }
 ```
+
+**字段说明:**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `enabled` | bool | HEP 监听器是否已配置 |
+| `running` | bool | 是否正在运行 |
+| `listen_addr` | string | UDP 监听地址 |
+| `received` | int | 收到的 HEP 包总数 |
+| `parsed` | int | 成功解析的 SIP 消息数 |
+| `errors` | int | 解析错误数 |
+| `buffer_count` | int | L1 环形缓冲区中当前消息数 |
+| `last_receive` | string | 最后收到消息的时间 |
+
+**两级缓存说明:**
+- L1: 无锁环形缓冲区（50000 条，atomic 操作，零拷贝读取）
+- L2: MongoDB overflow 集合 `hep_ring_overflow`（TTL 7 天，异步批量写入）
+- 查询时自动合并 L1 + L2 数据，按 timestamp 去重
 
 ---
 

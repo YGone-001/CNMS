@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -46,9 +47,11 @@ func NewTsharkQuery(ringDir string) *TsharkQuery {
 //  4. 调用 tshark -r 读取 + -Y 显示过滤 + -T json 输出
 //  5. 流式解析 JSON 输出为 []model.SignalingMessage
 //
-// 注意：IMSI/SUPI 显示过滤只对 GTPv2/Diameter/NAS 有效。
-// S1AP/SIP/PFCP 消息不直接携带 IMSI，当显示过滤无结果时，
-// 自动回退到获取全量信令消息（不限制过滤器）。
+// IMSI 过滤策略：
+//   - 复合显示过滤器: e212.imsi + diameter.User-Name + nas_5gs.mm.suci.msin + frame contains
+//   - e212.imsi 覆盖 4G 全协议 (GTPv2/GTP/Diameter/NAS-EPS/S1AP)
+//   - frame contains 兜底 SIP URI 中嵌入的 IMSI
+//   - 多级回退: 精确过滤 → frame contains → per-protocol 全量查询
 func (q *TsharkQuery) Query(queryType, queryValue string, timeRange model.TimeRange) ([]model.SignalingMessage, error) {
 	// 1. 列出 pcap 文件
 	files, err := q.listPcapFiles()
@@ -87,14 +90,7 @@ func (q *TsharkQuery) Query(queryType, queryValue string, timeRange model.TimeRa
 		// 6. 如果 frame contains 仍无结果，回退到按协议逐个查询
 		if len(messages) == 0 {
 			log.Printf("[TsharkQuery] frame contains returned 0, trying per-protocol queries")
-			protocolFilters := []string{
-				`s1ap || nas-eps || nas-5gs`,            // 无线接入网
-				`gtpv2 || gtp`,                          // 核心网隧道
-				`pfcp`,                                  // 用户面控制
-				`diameter`,                              // 认证/鉴权
-				`sip`,                                   // IMS 信令
-				`sgsap`,                                 // SGs 接口
-			}
+			protocolFilters := buildProtocolFilter()
 			var allMessages []model.SignalingMessage
 			seen := make(map[string]bool)
 			for _, pf := range protocolFilters {
@@ -162,16 +158,31 @@ func (q *TsharkQuery) QueryRaw(pcapFile string, displayFilter string) ([]byte, e
 // 显示过滤器构建
 // -----------------------------------------------------------
 
+// BuildTsharkFilter 根据查询类型和值构建 tshark 显示过滤器。
+//
+// 对于 IMSI/SUPI 查询，构建复合过滤器覆盖 4G/5G 混合组网下所有携带 IMSI 的协议：
+//   - e212.imsi: 跨协议统一 IMSI 字段 (GTPv2-C/GTP-C/Diameter/NAS-EPS/S1AP)
+//   - diameter.User-Name: Diameter Cx/Dx/S6a 接口的 IMSI 用户名
+//   - nas_5gs.mm.suci.msin: 5G NAS SUCI 中的 MSIN 部分
+//   - frame contains: SIP URI 中内嵌 IMSI 的兜底匹配
+//
+// 对于其他查询类型（MSISDN/SIP URI/Call-ID/TEID/IP/GUTI/IMPU/IMPI），
+// 使用各协议原生字段精确匹配。
+func BuildTsharkFilter(queryType, queryValue string) string {
+	// 委托给内部实现，保持可测试性
+	return buildDisplayFilter(queryType, queryValue)
+}
+
 // buildDisplayFilter 根据查询类型和值构建 tshark 显示过滤器
 func buildDisplayFilter(queryType, queryValue string) string {
 	switch strings.ToLower(queryType) {
 	case "imsi":
-		// e212.imsi 匹配 GTPv2-C/Diameter 中的 IMSI
-		// nas_5gs.mm.supi 匹配 5G NAS 中的 SUPI
-		return fmt.Sprintf(`e212.imsi == "%s" || nas_5gs.mm.supi contains "%s"`, queryValue, queryValue)
+		return buildIMSIFilter(queryValue)
 
 	case "supi":
-		return fmt.Sprintf(`nas_5gs.mm.supi contains "%s" || e212.imsi == "%s"`, queryValue, queryValue)
+		// SUPI 格式: imsi-460001234567890 或 460001234567890
+		trimmed := strings.TrimPrefix(queryValue, "imsi-")
+		return buildIMSIFilter(trimmed)
 
 	case "msisdn":
 		// gsm_a.msisdn 匹配 GSM MAP/Diameter 中的 MSISDN
@@ -206,6 +217,98 @@ func buildDisplayFilter(queryType, queryValue string) string {
 	default:
 		// 未知类型：全文搜索
 		return fmt.Sprintf(`frame contains "%s"`, queryValue)
+	}
+}
+
+// buildIMSIFilter 构建覆盖 4G/5G 全协议的 IMSI 复合显示过滤器。
+//
+// tshark 字段覆盖矩阵:
+//   Protocol  | tshark field        | 类型     | 网络制式 | 场景
+//   ----------|---------------------|----------|---------|---------------------------
+//   GTPv2-C   | e212.imsi           | FT_STRING| 4G      | Create Session/Modify Bearer
+//   GTP-C v1  | e212.imsi           | FT_STRING| 2G/3G   | Create PDP Context
+//   Diameter  | e212.imsi           | FT_STRING| 4G/5G   | Cx/Dx/S6a (IMSI in AVP)
+//   Diameter  | diameter.User-Name  | FT_STRING| 4G/5G   | MAR/SAR/AIR (IMSI as username)
+//   NAS-EPS   | e212.imsi           | FT_STRING| 4G      | Identity Response
+//   S1AP      | e212.imsi           | FT_STRING| 4G      | UE Identity (IMSI)
+//   NAS-5GS   | nas_5gs.mm.suci.msin| FT_STRING| 5G      | SUCI 中的 MSIN 部分
+//   SIP       | frame contains      | raw text | IMS     | REGISTER/INVITE URI 嵌入 IMSI
+//
+// e212.imsi 是 tshark 的 E.212 协议解码器统一字段，覆盖 4G 核心网所有协议。
+// nas_5gs.mm.suci.msin 匹配 5G NAS SUCI 中的 MSIN（不含 MCC/MNC）。
+// frame contains 作为 SIP URI 兜底（SIP 消息体中可能嵌入完整 IMSI）。
+//
+// 使用 || 连接，任一协议匹配即命中。
+func buildIMSIFilter(imsi string) string {
+	// 提取 MSIN: 去掉前 3 位 MCC + 2/3 位 MNC
+	// 例: 460001234567890 -> MCC=460, MNC=00 -> MSIN=1234567890
+	// 例: 417010000000002 -> MCC=417, MNC=01 -> MSIN=000000002
+	msin := extractMSIN(imsi)
+
+	// 构造 SUPI 格式用于 frame contains 兜底匹配
+	supi := "imsi-" + imsi
+
+	if msin != "" && msin != imsi {
+		return fmt.Sprintf(
+			`e212.imsi == "%[1]s" || diameter.User-Name == "%[1]s" || nas_5gs.mm.suci.msin == "%[3]s" || frame contains "%[1]s" || frame contains "%[2]s"`,
+			imsi, supi, msin,
+		)
+	}
+	return fmt.Sprintf(
+		`e212.imsi == "%[1]s" || diameter.User-Name == "%[1]s" || frame contains "%[1]s" || frame contains "%[2]s"`,
+		imsi, supi,
+	)
+}
+
+// extractMSIN 从 IMSI 中提取 MSIN 部分（去掉 MCC + MNC）。
+//
+// IMSI 结构: MCC(3) + MNC(2 or 3) + MSIN(remaining)
+// MCC: 3 位，国家代码（如 460=中国, 417=叙利亚, 310=美国）
+// MNC: 2 或 3 位，由 MCC 决定（MCC 460/417 等用 2 位 MNC）
+//
+// 返回 MSIN 字符串；若 IMSI 格式不合法返回空串。
+func extractMSIN(imsi string) string {
+	if len(imsi) < 8 || len(imsi) > 15 {
+		return ""
+	}
+	// 纯数字校验
+	for _, c := range imsi {
+		if c < '0' || c > '9' {
+			return ""
+		}
+	}
+	mcc := imsi[:3]
+	// 根据 MCC 判断 MNC 长度（2 位或 3 位）
+	// 已知 3 位 MNC 的 MCC 前缀:
+	//   302 (Canada), 310-316 (USA), 330 (Puerto Rico),
+	//   334 (Mexico), 338 (Jamaica), 342 (Barbados), 344 (Antigua),
+	//   346 (Cayman), 348 (BVI), 350 (Bermuda), 352 (Grenada),
+	//   354 (Montserrat), 356 (Saint Kitts), 358 (Saint Lucia),
+	//   360 (Saint Vincent), 362 (Netherlands Antilles), 363 (Aruba),
+	//   364 (Bahamas), 365 (Anguilla), 366 (Dominica), 368 (Cuba),
+	//   370 (Dominican Republic), 372 (Haiti), 374 (Trinidad),
+	//   376 (Turks and Caicos)
+	// 简化: 302/31x/33x 用 3 位 MNC，其余用 2 位
+	mncLen := 2
+	if strings.HasPrefix(mcc, "3") {
+		mncLen = 3
+	}
+	if len(imsi) < 3+mncLen {
+		return ""
+	}
+	return imsi[3+mncLen:]
+}
+
+// buildProtocolFilter 为 per-protocol 回退查询构建协议组过滤器。
+// 当复合 IMSI 过滤无结果时，按协议族逐组查询。
+func buildProtocolFilter() []string {
+	return []string{
+		`s1ap || nas-eps || nas-5gs`, // 无线接入网 (RAN/NAS)
+		`gtpv2 || gtp`,               // 核心网隧道 (GTP)
+		`diameter`,                    // 认证/鉴权 (Cx/Dx/S6a)
+		`pfcp`,                        // 用户面控制 (N4)
+		`sip`,                         // IMS 信令 (SIP)
+		`sgsap`,                       // SGs 接口 (CSFB)
 	}
 }
 
@@ -444,6 +547,8 @@ type fieldsRecord struct {
 	SIPCSeq       string
 	SIPFromUser   string
 	SIPToUser     string
+	SIPFromURI    string // sip.from.uri (完整 URI，用于正则提取 IMSI)
+	SIPToURI      string // sip.to.uri
 	DiamCmdCode   string
 	DiamAppID     string
 	DiamRequest   string
@@ -458,7 +563,10 @@ type fieldsRecord struct {
 	PFCPType      string
 	PFCPSEID      string
 	S1APProc      string
+	S1APIMSI      string // S1AP UE Identity Response 中的 IMSI (s1ap.iMSI, FT_BYTES)
 	NGAPProc      string
+	E212IMSI      string // E.212 统一 IMSI (跨协议: GTPv2/GTP/Diameter/NAS-EPS)
+	NAS5GSMSIN    string // NAS-5GS SUCI MSIN 部分
 }
 
 // runTsharkFields 使用 -T fields 提取特定字段。
@@ -482,6 +590,7 @@ func (q *TsharkQuery) runTsharkFields(pcapFile, displayFilter string) ([]fieldsR
 		"-e", "sip.Method", "-e", "sip.Status-Code", "-e", "sip.Call-ID",
 		"-e", "sip.CSeq.method",
 		"-e", "sip.from.user", "-e", "sip.to.user",
+		"-e", "sip.from.uri", "-e", "sip.to.uri", // URI 中可能嵌入 IMSI
 		// Diameter AVP 字段（-T json 无法提取这些）
 		"-e", "diameter.cmd.code", "-e", "diameter.applicationId",
 		"-e", "diameter.flags.request",
@@ -494,6 +603,12 @@ func (q *TsharkQuery) runTsharkFields(pcapFile, displayFilter string) ([]fieldsR
 		"-e", "pfcp.msg_type", "-e", "pfcp.seid",
 		// S1AP/NGAP
 		"-e", "s1ap.procedureCode", "-e", "ngap.procedureCode",
+		// S1AP IMSI (FT_BYTES, 用于 Identity Response)
+		"-e", "s1ap.iMSI",
+		// E.212 IMSI (跨协议统一字段: GTPv2/GTP/Diameter/NAS-EPS)
+		"-e", "e212.imsi",
+		// NAS-5GS SUCI MSIN
+		"-e", "nas_5gs.mm.suci.msin",
 		"-c", strconv.Itoa(q.MaxPackets),
 	}
 	if displayFilter != "" {
@@ -547,37 +662,48 @@ func (q *TsharkQuery) runTsharkFields(pcapFile, displayFilter string) ([]fieldsR
 			SIPCSeq:       cols[10],
 			SIPFromUser:   cols[11],
 			SIPToUser:     cols[12],
-			DiamCmdCode:   cols[13],
-			DiamAppID:     cols[14],
-			DiamRequest:   cols[15],
-			DiamResult:    cols[16],
-			DiamOriginH:   cols[17],
-			DiamUser:      cols[18],
-			DiamSession:   cols[19],
-		}
-		if len(cols) > 20 {
-			rec.GTPv2Type = cols[20]
-		}
-		if len(cols) > 21 {
-			rec.GTPv2TEID = cols[21]
+			SIPFromURI:    cols[13],
+			SIPToURI:      cols[14],
+			DiamCmdCode:   cols[15],
+			DiamAppID:     cols[16],
+			DiamRequest:   cols[17],
+			DiamResult:    cols[18],
+			DiamOriginH:   cols[19],
+			DiamUser:      cols[20],
+			DiamSession:   cols[21],
 		}
 		if len(cols) > 22 {
-			rec.GTPv2Cause = cols[22]
+			rec.GTPv2Type = cols[22]
 		}
 		if len(cols) > 23 {
-			rec.GTPv2PAA = cols[23]
+			rec.GTPv2TEID = cols[23]
 		}
 		if len(cols) > 24 {
-			rec.PFCPType = cols[24]
+			rec.GTPv2Cause = cols[24]
 		}
 		if len(cols) > 25 {
-			rec.PFCPSEID = cols[25]
+			rec.GTPv2PAA = cols[25]
 		}
 		if len(cols) > 26 {
-			rec.S1APProc = cols[26]
+			rec.PFCPType = cols[26]
 		}
 		if len(cols) > 27 {
-			rec.NGAPProc = cols[27]
+			rec.PFCPSEID = cols[27]
+		}
+		if len(cols) > 28 {
+			rec.S1APProc = cols[28]
+		}
+		if len(cols) > 29 {
+			rec.NGAPProc = cols[29]
+		}
+		if len(cols) > 30 {
+			rec.S1APIMSI = cols[30]
+		}
+		if len(cols) > 31 {
+			rec.E212IMSI = cols[31]
+		}
+		if len(cols) > 32 {
+			rec.NAS5GSMSIN = cols[32]
 		}
 		records = append(records, rec)
 	}
@@ -657,6 +783,15 @@ func supplementMessages(messages []model.SignalingMessage, fields []fieldsRecord
 						msg.Identifiers.IMSI = imsi
 					}
 				}
+				// 从 SIP URI 正则提取明文 IMSI (sip:15位数字@)
+				if msg.Identifiers.IMSI == "" {
+					for _, uri := range []string{sf.rec.SIPFromURI, sf.rec.SIPToURI} {
+						if imsi := extractIMSIFromSIPURI(uri); imsi != "" {
+							msg.Identifiers.IMSI = imsi
+							break
+						}
+					}
+				}
 				if _, ok := msg.Details["cseq_method"]; !ok && sf.rec.SIPCSeq != "" {
 					msg.Details["cseq_method"] = sf.rec.SIPCSeq
 				}
@@ -699,7 +834,7 @@ func supplementMessages(messages []model.SignalingMessage, fields []fieldsRecord
 			}
 		}
 
-		// GTPv2 补充 cause + UE IPv4
+		// GTPv2 补充 cause + UE IPv4 + IMSI
 		if msg.Protocol == "GTPv2C" {
 			for _, f := range fields {
 				fTs, _ := strconv.ParseFloat(f.Timestamp, 64)
@@ -717,6 +852,62 @@ func supplementMessages(messages []model.SignalingMessage, fields []fieldsRecord
 				// 补充 UE IPv4 (PAA - PDN Address Allocation)
 				if msg.Identifiers.UEIPv4 == "" && f.GTPv2PAA != "" {
 					msg.Identifiers.UEIPv4 = f.GTPv2PAA
+				}
+				// 补充 E.212 IMSI (GTPv2/GTP/Diameter/NAS-EPS 统一字段)
+				if msg.Identifiers.IMSI == "" && f.E212IMSI != "" {
+					msg.Identifiers.IMSI = f.E212IMSI
+				}
+				break
+			}
+		}
+
+		// S1AP 补充 IMSI (s1ap.iMSI 是 FT_BYTES，e212.imsi 也可能匹配)
+		if msg.Protocol == "S1AP" {
+			for _, f := range fields {
+				fTs, _ := strconv.ParseFloat(f.Timestamp, 64)
+				if abs64(fTs-ts) > 0.01 {
+					continue
+				}
+				if msg.Identifiers.IMSI == "" {
+					if f.S1APIMSI != "" {
+						msg.Identifiers.IMSI = f.S1APIMSI
+					} else if f.E212IMSI != "" {
+						msg.Identifiers.IMSI = f.E212IMSI
+					}
+				}
+				break
+			}
+		}
+
+		// NAS-EPS 补充 IMSI (e212.imsi 覆盖 NAS-EPS Identity Response)
+		if msg.Protocol == "NAS-EPS" {
+			for _, f := range fields {
+				fTs, _ := strconv.ParseFloat(f.Timestamp, 64)
+				if abs64(fTs-ts) > 0.01 {
+					continue
+				}
+				if msg.Identifiers.IMSI == "" && f.E212IMSI != "" {
+					msg.Identifiers.IMSI = f.E212IMSI
+				}
+				break
+			}
+		}
+
+		// NAS-5GS 补充 MSIN (SUCI 中的 MSIN 部分，需要组合 MCC+MNC+MSIN 还原 IMSI)
+		if msg.Protocol == "NAS-5GS" {
+			for _, f := range fields {
+				fTs, _ := strconv.ParseFloat(f.Timestamp, 64)
+				if abs64(fTs-ts) > 0.01 {
+					continue
+				}
+				if f.NAS5GSMSIN != "" && msg.Identifiers.IMSI == "" {
+					// MSIN 仅是 IMSI 的一部分，无法独立还原完整 IMSI
+					// 存入 details 供后续关联使用
+					msg.Details["suci_msin"] = f.NAS5GSMSIN
+				}
+				// E.212 IMSI 在 5G NAS 中通常不可用（SUPI 被加密为 SUCI）
+				if msg.Identifiers.IMSI == "" && f.E212IMSI != "" {
+					msg.Identifiers.IMSI = f.E212IMSI
 				}
 				break
 			}
@@ -910,9 +1101,20 @@ func parseSIPFromLayers(msg *model.SignalingMessage, raw any) {
 	if from, ok := findInMap(sip, "sip.from.user"); ok {
 		msg.Identifiers.MSISDN = extractMSISDN(from)
 		msg.Identifiers.SIPURI = from
-		// 尝试从 SIP URI 提取 IMSI（如 sip:417010000000003@ims.mnc001.mcc417.3gppnetwork.org）
+		// 尝试从 SIP user 部分提取 IMSI
 		if imsi := extractIMSI(from); imsi != "" {
 			msg.Identifiers.IMSI = imsi
+		}
+	}
+	// 正则提取 sip.from.uri 中明文 IMSI (sip:15位数字@)
+	if fromURI, ok := findInMap(sip, "sip.from.uri"); ok {
+		if msg.Identifiers.IMSI == "" {
+			if imsi := extractIMSIFromSIPURI(fromURI); imsi != "" {
+				msg.Identifiers.IMSI = imsi
+			}
+		}
+		if msg.Identifiers.SIPURI == "" {
+			msg.Identifiers.SIPURI = fromURI
 		}
 	}
 	if to, ok := findInMap(sip, "sip.to.user"); ok {
@@ -921,6 +1123,14 @@ func parseSIPFromLayers(msg *model.SignalingMessage, raw any) {
 		}
 		if msg.Identifiers.IMSI == "" {
 			if imsi := extractIMSI(to); imsi != "" {
+				msg.Identifiers.IMSI = imsi
+			}
+		}
+	}
+	// 正则提取 sip.to.uri 中明文 IMSI
+	if toURI, ok := findInMap(sip, "sip.to.uri"); ok {
+		if msg.Identifiers.IMSI == "" {
+			if imsi := extractIMSIFromSIPURI(toURI); imsi != "" {
 				msg.Identifiers.IMSI = imsi
 			}
 		}
@@ -974,6 +1184,27 @@ func extractIMSI(s string) string {
 	// 如果没有匹配已知 MCC，但有 15 位纯数字，也返回（可能是测试 IMSI）
 	if len(digits) >= 15 {
 		return digits[:15]
+	}
+	return ""
+}
+
+// reSIPURIImsi 匹配 SIP URI 中明文嵌入的 IMSI。
+//
+// 匹配模式: sip:<15位数字>@... 或 sips:<15位数字>@...
+// 示例: sip:417010000000003@ims.mnc001.mcc417.3gppnetwork.org
+//
+// 这是 IMS 注册场景中 P-CSCF/S-CSCF 在 SIP URI 中携带 IMSI 的标准格式。
+// 与 extractIMSI 的区别: 本函数严格匹配 URI 结构 (sip:...@)，
+// 避免从 SIP 消息体中误提取不相关的数字序列。
+var reSIPURIImsi = regexp.MustCompile(`sips?:(\d{15})@`)
+
+// extractIMSIFromSIPURI 从 SIP URI 中正则提取明文 IMSI。
+//
+// 返回第一个匹配的 15 位 IMSI；无匹配返回空串。
+func extractIMSIFromSIPURI(s string) string {
+	m := reSIPURIImsi.FindStringSubmatch(s)
+	if len(m) > 1 {
+		return m[1]
 	}
 	return ""
 }

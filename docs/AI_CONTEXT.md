@@ -12,9 +12,9 @@ xCloud-CNMS 是一个专业的 4G/5G/IMS 核心网监控管理平台，面向电
 
 版本：v1.4.1
 
-**当前状态**：信令追踪模块已完成 tshark JSON 输出修复和跨协议关联增强。SIP 字段（Method/Status-Code/From/To）正常提取，Diameter AVP（Origin-Host/User-Name）通过 -T fields 补充查询获取，GTPv2 状态码修正为 Cause=16。
+**当前状态**：信令追踪模块完成深度优化。HEP3 解析器修复（6 字节 chunk 头），复合 IMSI 过滤器覆盖 4G/5G 全协议（e212.imsi + diameter.User-Name + nas_5gs.mm.suci.msin），Identity Context Tree 实现 SIP ↔ NAS/S1AP 跨层关联，两级缓存架构（L1 无锁 ring buffer + L2 MongoDB overflow）。
 
-**最近更新**：2026-07-07 — 阶段十一：tshark JSON 输出修复 + 跨协议关联增强
+**最近更新**：2026-07-08 — 阶段十二：信令追踪模块深度优化（HEP3 修复 + 复合 IMSI 过滤 + 跨层关联 + 两级缓存）
 
 ---
 
@@ -185,27 +185,33 @@ MongoDB (历史指标) → aiops/aggregator.go (每小时聚合)
 
 ```
 数据来源优先级：
-  1. HEPListener — Kamailio siptrace 通过 HEPv3 推送到 :9060/udp（优先，性能好）
+  1. HEPListener — Kamailio siptrace 通过 HEPv3 推送到 :9060/udp
+     L1: 无锁环形缓冲区（50000 条，atomic 操作）
+     L2: MongoDB overflow 集合 hep_ring_overflow（TTL 7 天，异步批量写入）
   2. Homer API — 从 Homer 查询已存储的 SIP 消息（辅助，HEP 无数据时）
-  3. TsharkQuery — 从 tshark 环形缓冲区 pcap 查询全协议（兜底）
+  3. TsharkQuery — 从 tshark 环形缓冲区 pcap 查询（复合 IMSI 过滤器）
 
 前端 SignalingTrace → POST /api/v1/signaling/trace (query_type/value/scenario/time_range)
                    → handler/signaling.go 创建 SignalingTrace (status=running)
                    → goroutine 异步执行:
-                     → HEPListener.QueryByIMSI() 从缓冲区查询 SIP 消息（优先）
+                     → HEPListener.QueryByIMSI() 从 L1 ring + L2 MongoDB 查询 SIP 消息（优先）
                      → h.Homer.Search() 查询 Homer API（HEP 无数据时）
                      → TsharkQuery.Query() 从环形缓冲区 pcap 查询（兜底）
-                       → buildDisplayFilter() 构建精确过滤器 (e212.imsi/nas_5gs.mm.supi)
-                       → 无结果时回退: frame contains "IMSI值" → 按协议逐个查询
-                     → signaling/correlator.go Union-Find 多维关联
+                       → BuildTsharkFilter() 构建复合过滤器:
+                         e212.imsi || diameter.User-Name || nas_5gs.mm.suci.msin || frame contains
+                       → 无结果时回退: per-protocol 查询
+                     → signaling/correlator.go Union-Find 多维关联（7 条规则）
+                     → mergeCrossLayerIdentity() 跨层合并:
+                       SIP (Call-ID + IMSI from URI) ↔ NAS/S1AP/GTP (e212.imsi)
                      → MongoDB signaling_messages + signaling_traces (状态更新)
                    → 前端轮询 GET /api/v1/signaling/trace/{id} 检查状态
                    → 完成后加载消息 → LadderDiagram / MessageDetail / MediaQuality 展示
 
 关键组件：
   - CaptureDaemon: tshark 持续抓包 → /var/spool/xcloud/signaling/ring_*.pcap（环形缓冲区 20×100MB）
-  - TsharkQuery: 从 pcap 按 IMSI/SIP/TEID 等条件查询（editcap 时间裁剪 + mergecap 合并 + tshark 显示过滤）
-  - HEPListener: UDP 9060 监听 HEPv3 包，解析 SIP 消息，按 IMSI/CallID 建索引（缓冲区 50000 条）
+  - TsharkQuery: 从 pcap 查询（复合 IMSI 过滤器 + -T fields 补充 Diameter/S1AP/NAS 字段）
+  - HEPListener: UDP 9060 监听 HEPv3 包，两级缓存（L1 ring + L2 MongoDB），按 IMSI/CallID 建索引
+  - Correlator: Union-Find 关联引擎 + Identity Context Tree 跨层合并
 
 协议接口-网元映射（tshark_query.go）：
   - SIP: Gm(UE↔P-CSCF), Mw(P-CSCF↔I-CSCF↔S-CSCF), ISC(S-CSCF↔AS)
@@ -241,7 +247,7 @@ MySQL scscf                → handler/business_metrics.go → S-CSCF 注册数
 
 ## 数据存储
 
-- **MongoDB (xCloud)**: 23+ 集合（告警、指标、订户、站点、任务、备份、知识库、审计日志、AIOps 子集合、通知、KPI、capture_sessions、signaling_messages、signaling_traces、media_quality 等）
+- **MongoDB (xCloud)**: 24+ 集合（告警、指标、订户、站点、任务、备份、知识库、审计日志、AIOps 子集合、通知、KPI、capture_sessions、signaling_messages、signaling_traces、media_quality、hep_ring_overflow 等）
 - **MongoDB (open5gs)**: open5gs 核心网订户数据
 - **MySQL (hss_db)**: IMS 订户数据（IMPI/IMPU 表）
 - **MySQL (scscf)**: S-CSCF 注册/联系数据
