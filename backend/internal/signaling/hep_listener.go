@@ -672,6 +672,7 @@ func (l *HEPListener) parseSIPPayload(pkt *hepPacket) *model.SignalingMessage {
 		SourcePort: pkt.SrcPort,
 		DestPort:   pkt.DstPort,
 		Timestamp:  pkt.Timestamp,
+		DataSource: "hep",
 		Details:    make(map[string]any),
 	}
 
@@ -758,6 +759,9 @@ func (l *HEPListener) QueryByIMSI(imsi string, start, end time.Time) []model.Sig
 	// L2: MongoDB overflow
 	if l.mongoColl != nil {
 		l2Msgs := l.queryMongoByIMSI(imsi, start, end)
+		for i := range l2Msgs {
+			l2Msgs[i].DataSource = "hep_mongo"
+		}
 		result = mergeMessages(result, l2Msgs)
 	}
 
@@ -770,6 +774,9 @@ func (l *HEPListener) QueryByCallID(callID string) []model.SignalingMessage {
 
 	if l.mongoColl != nil {
 		l2Msgs := l.queryMongoByCallID(callID)
+		for i := range l2Msgs {
+			l2Msgs[i].DataSource = "hep_mongo"
+		}
 		result = mergeMessages(result, l2Msgs)
 	}
 
@@ -782,6 +789,9 @@ func (l *HEPListener) QueryAll(start, end time.Time, limit int) []model.Signalin
 
 	if l.mongoColl != nil {
 		l2Msgs := l.queryMongoAll(start, end, limit)
+		for i := range l2Msgs {
+			l2Msgs[i].DataSource = "hep_mongo"
+		}
 		result = mergeMessages(result, l2Msgs)
 	}
 

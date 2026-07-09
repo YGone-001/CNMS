@@ -519,7 +519,10 @@ function SignalingTrace() {
   useEffect(() => {
     fetchTraces();
     fetchHepStatus();
+    // HEP 状态每 10 秒刷新（反映实时 buffer_count / received 变化）
+    const hepTimer = window.setInterval(fetchHepStatus, 10000);
     return () => {
+      clearInterval(hepTimer);
       if (pollTimer.current) clearTimeout(pollTimer.current);
       if (toastTimer.current) clearTimeout(toastTimer.current);
     };

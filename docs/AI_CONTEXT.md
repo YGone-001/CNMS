@@ -12,9 +12,9 @@ xCloud-CNMS 是一个专业的 4G/5G/IMS 核心网监控管理平台，面向电
 
 版本：v1.4.1
 
-**当前状态**：信令追踪模块完成深度优化。HEP3 解析器修复（6 字节 chunk 头），复合 IMSI 过滤器覆盖 4G/5G 全协议（e212.imsi + diameter.User-Name + nas_5gs.mm.suci.msin），Identity Context Tree 实现 SIP ↔ NAS/S1AP 跨层关联，两级缓存架构（L1 无锁 ring buffer + L2 MongoDB overflow）。
+**当前状态**：信令追踪模块完成端到端验证与修复。pcap 文件名时间预筛选（271→2 文件，秒级完成），后端 Model 补 data_source/cross_layer 字段，HEP Listener MongoDB overflow 已启用（mongo=true），Correlator 跨层标记，CaptureDaemon 磁盘上限 6GB 自动清理，前端 HEP Status 10 秒轮询。
 
-**最近更新**：2026-07-08 — 阶段十二：信令追踪模块深度优化（HEP3 修复 + 复合 IMSI 过滤 + 跨层关联 + 两级缓存）
+**最近更新**：2026-07-09 — 阶段十三：信令追踪端到端验证与修复（pcap 预筛选 + data_source 赋值 + HEP MongoDB 启用 + 磁盘清理 + 跨层标记）
 
 ---
 
@@ -208,10 +208,11 @@ MongoDB (历史指标) → aiops/aggregator.go (每小时聚合)
                    → 完成后加载消息 → LadderDiagram / MessageDetail / MediaQuality 展示
 
 关键组件：
-  - CaptureDaemon: tshark 持续抓包 → /var/spool/xcloud/signaling/ring_*.pcap（环形缓冲区 20×100MB）
-  - TsharkQuery: 从 pcap 查询（复合 IMSI 过滤器 + -T fields 补充 Diameter/S1AP/NAS 字段）
+  - CaptureDaemon: tshark 持续抓包 → /var/spool/xcloud/signaling/ring_*.pcap（环形缓冲区 20×100MB，磁盘上限 6GB 自动清理）
+  - TsharkQuery: 从 pcap 查询（复合 IMSI 过滤器 + -T fields 补充 Diameter/S1AP/NAS 字段 + 文件名时间预筛选）
   - HEPListener: UDP 9060 监听 HEPv3 包，两级缓存（L1 ring + L2 MongoDB），按 IMSI/CallID 建索引
-  - Correlator: Union-Find 关联引擎 + Identity Context Tree 跨层合并
+  - Correlator: Union-Find 关联引擎 + Identity Context Tree 跨层合并 + CrossLayer 标记
+  - data_source 字段：每条消息标记来源 (hep / hep_mongo / tshark / homer)
 
 协议接口-网元映射（tshark_query.go）：
   - SIP: Gm(UE↔P-CSCF), Mw(P-CSCF↔I-CSCF↔S-CSCF), ISC(S-CSCF↔AS)
@@ -232,6 +233,7 @@ tshark 查询策略（Phase 11 修复）：
   - pcap 使用 Linux cooked-mode capture (sll)，部分 TCP 协议解析仍有局限
   - Diameter AVP 提取依赖 -T fields 补充查询（双查询开销）
   - NAS 方向检测仍使用默认 "request"（需从 SCTP 端口判断）
+  - 跨层标记仅在 SIP + NAS/S1AP 同时存在时触发（需 HEP 和 tshark 都有数据）
 ```
 
 ### 外部数据集成

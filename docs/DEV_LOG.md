@@ -556,33 +556,125 @@ HEP Status: enabled=true, running=true, listen_addr=:9060
 | 文档体系 | ✅ 已建立 | 6 个文档全面更新 |
 | IMS 配置 | 🔄 调优中 | P/S/I-CSCF 已配置，持续优化 |
 | 一键抓包 | ✅ 已完成 | tcpdump 管理、12 种协议预设、WebSocket 实时进度 |
-| 信令持续抓包 | ✅ 已完成 | CaptureDaemon tshark 环形缓冲区 + TsharkQuery 查询引擎 |
-| HEP 监听 | ✅ 已完成 | UDP 9060 接收 Kamailio siptrace，两级缓存（L1 ring + L2 MongoDB） |
-| 信令追踪 | ✅ 已完成 | 三级数据源 + Union-Find 关联 + Identity Context Tree 跨层合并 |
-| 协议接口映射 | ✅ 已修正 | Diameter/SIP/GTPv2/PFCP/S1AP/NGAP/NAS/SGsAP 全面修正 |
+| 信令持续抓包 | ✅ 已完成 | CaptureDaemon tshark 环形缓冲区 + 磁盘上限 6GB 自动清理 |
+| HEP 监听 | ✅ 已完成 | UDP 9060，两级缓存（L1 ring + L2 MongoDB overflow），mongo=true |
+| 信令追踪 | ✅ 已完成 | 三级数据源 + Union-Find 关联 + 跨层标记 + 数据源标签 |
+| pcap 查询性能 | ✅ 已优化 | 文件名时间预筛选（271→2 文件），秒级完成 |
 | IMSI 过滤 | ✅ 已完成 | 复合过滤器覆盖 e212.imsi/diameter.User-Name/nas_5gs.mm.suci.msin |
-| 跨层关联 | ✅ 已完成 | SIP ↔ NAS/S1AP 通过 Call-ID → IMSI 映射桥接 |
+| 跨层关联 | ✅ 已完成 | SIP ↔ NAS/S1AP 通过 Call-ID → IMSI 映射桥接 + CrossLayer 标记 |
+| 端到端验证 | ✅ 通过 | IMSI 417010000000002 → 542 消息，5 网元，秒级完成 |
 
-### 信令数据源架构（2026-07-08 更新）
+### 信令数据源架构（2026-07-09 更新）
 
 ```
-优先级 1: Kamailio → HEPv3 → :9060/udp → HEPListener
+优先级 1: Kamailio → HEPv3 → :9060/udp → HEPListener (mongo=true)
            ├─ L1: 无锁环形缓冲区 (50000 条, atomic)
            └─ L2: MongoDB overflow (hep_ring_overflow, TTL 7天)
+           data_source: "hep" (L1) / "hep_mongo" (L2)
 
 优先级 2: Homer API → 已存储的 SIP 消息（HEP 无数据时）
+           data_source: "homer"
 
 优先级 3: tshark 持续抓包 → /var/spool/xcloud/signaling/ring_*.pcap → TsharkQuery
+           → pcap 文件名时间预筛选 (271→2 文件, 秒级)
            → 复合 IMSI 过滤器 (e212.imsi || diameter.User-Name || nas_5gs.mm.suci.msin || frame contains)
+           data_source: "tshark"
 
 跨层关联: mergeCrossLayerIdentity (Identity Context Tree)
            SIP (Call-ID + IMSI from URI) ↔ NAS/S1AP/GTP (e212.imsi)
            通过 Call-ID → IMSI 映射在 Union-Find 中合并
+           合并后标记 cross_layer=true
+
+磁盘管理: CaptureDaemon cleanupLoop (每 60s)
+           ring_max_disk_mb=6144 (6GB), 超限删最旧文件
 ```
 
 ### 配置项（config.json）
 
 ```json
-"signaling_capture": { "enabled": true, "interface": "any", "ring_dir": "/var/spool/xcloud/signaling", "ring_file_size_mb": 100, "ring_file_count": 20 }
+"signaling_capture": { "enabled": true, "interface": "any", "ring_dir": "/var/spool/xcloud/signaling", "ring_file_size_mb": 100, "ring_file_count": 20, "ring_max_disk_mb": 6144 }
 "hep_listener": { "enabled": true, "listen_addr": ":9060", "buffer_size": 50000 }
+```
+
+---
+
+## 阶段十三：信令追踪模块端到端验证与修复 (2026-07-09)
+
+**状态**: ✅ 已完成
+
+### 背景
+
+对 IMSI `417010000000002` 进行真实端到端追踪测试，发现多个功能性缺陷和性能瓶颈。
+
+### 已完成内容
+
+**1. pcap 文件名时间预筛选（性能优化）**
+
+- 新增 `filterPcapByFilename()` — 解析 pcap 文件名中的 14 位时间戳（`ring_XXXXX_NNNNN_YYYYMMDDHHmmss.pcap`）
+- 只处理与查询时间窗口重叠的文件，前后各扩展 5 分钟防边界遗漏
+- 效果：271 文件 → 2 文件，从超时/分钟级降至秒级完成
+
+**2. 后端 Model 补字段**
+
+- `model/signaling.go` 新增 `DataSource` 和 `CrossLayer` 字段
+- 前端类型已定义但后端从未填充 → 前端数据源标签和跨层标识永远不显示
+
+**3. HEP Listener MongoDB Overflow 启用**
+
+- 问题：`main.go` 初始化 HEPListener 时未传入 MongoDB client → `mongo=false`
+- 修复：传入 `mc.GetClient()` + `cfg.MongoDB.Database`
+- 效果：`[HEPListener] listening on :9060 (buffer=50000, mongo=true)` ✅
+
+**4. 数据源标记赋值**
+
+- `hep_listener.go` — `parseSIPPayload` 中设置 `DataSource: "hep"`
+- `hep_listener.go` — L2 查询结果设置 `DataSource: "hep_mongo"`
+- `tshark_query.go` — `parseTsharkLayers` 中设置 `DataSource: "tshark"`
+- `handler/signaling.go` — Homer 消息设置 `DataSource: "homer"`
+
+**5. 跨层关联标记**
+
+- `correlator.go` — `mergeCrossLayerIdentity` 合并后收集参与跨层合并的消息索引
+- 设置 `messages[idx].CrossLayer = true`，日志输出 `tagged N messages`
+
+**6. CaptureDaemon 磁盘上限 6GB**
+
+- 新增 `RingMaxDiskMB` 配置字段（默认 6144MB = 6GB）
+- 新增 `cleanupLoop()` 后台 goroutine — 每 60 秒检查 ring 目录大小
+- 新增 `pruneOldFiles()` — 按修改时间从旧到新删除，直到低于限额
+- tshark 内建 `-b files:20` 控制单次运行（2GB），cleanupLoop 处理跨重启残留
+
+**7. 前端 HEP Status 自动刷新**
+
+- `fetchHepStatus` 从 mount 时单次调用改为 `setInterval` 10 秒轮询
+- 实时反映 buffer_count / received / errors 变化
+
+### 修改文件
+
+| 文件 | 变更类型 | 说明 |
+|------|----------|------|
+| `backend/internal/model/signaling.go` | 增强 | 新增 DataSource / CrossLayer 字段 |
+| `backend/internal/signaling/tshark_query.go` | 增强 | pcap 文件名时间预筛选 + DataSource 赋值 |
+| `backend/internal/signaling/hep_listener.go` | 增强 | DataSource 赋值 (hep / hep_mongo) |
+| `backend/internal/signaling/correlator.go` | 增强 | 跨层合并后 CrossLayer 标记 |
+| `backend/internal/signaling/capture_daemon.go` | 增强 | RingMaxDiskMB + cleanupLoop + pruneOldFiles |
+| `backend/internal/handler/signaling.go` | 增强 | Homer 消息 DataSource 赋值 |
+| `backend/internal/config/config.go` | 增强 | SignalingCaptureConfig 新增 RingMaxDiskMB |
+| `backend/main.go` | 增强 | 传递 MongoDB client + RingMaxDiskMB |
+| `backend/config/config.json` | 增强 | ring_max_disk_mb: 6144 |
+| `frontend/src/pages/SignalingTrace.tsx` | 增强 | HEP Status 10 秒轮询 |
+
+### 验证结果
+
+```
+端到端测试 IMSI 417010000000002 (18:40-19:00):
+  状态: completed
+  消息数: 542
+  网元: eNB, MME, SMF, UPF, Diameter Peer
+  协议: PFCP 150, Diameter 48, S1AP 2
+  数据源: tshark (全部)
+  处理时间: 秒级（pcap 预筛选 2 文件）
+  
+HEP Listener: running=true, mongo=true, buffer=0 (刚重启)
+CaptureDaemon: ring_max_disk_mb=6144 (6GB), cleanupLoop 运行中
 ```

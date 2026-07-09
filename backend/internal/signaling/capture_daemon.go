@@ -33,6 +33,7 @@ type CaptureDaemonConfig struct {
 	RingDir         string `json:"ring_dir"`          // pcap 存储目录
 	RingFileSizeMB  int    `json:"ring_file_size_mb"` // 每个文件大小 (MB)
 	RingFileCount   int    `json:"ring_file_count"`   // 环形文件数量
+	RingMaxDiskMB   int    `json:"ring_max_disk_mb"`  // 目录磁盘上限 (MB)，超限删最旧文件，默认 5120 (5GB)
 	BPFFilter       string `json:"bpf_filter"`        // BPF 过滤表达式
 }
 
@@ -86,6 +87,9 @@ func NewCaptureDaemon(cfg CaptureDaemonConfig) *CaptureDaemon {
 	if cfg.BPFFilter == "" {
 		cfg.BPFFilter = DefaultBPF
 	}
+	if cfg.RingMaxDiskMB <= 0 {
+		cfg.RingMaxDiskMB = 6144 // 6GB
+	}
 
 	return &CaptureDaemon{
 		cfg:        cfg,
@@ -113,6 +117,9 @@ func (d *CaptureDaemon) Start() error {
 
 	// 启动崩溃监控 goroutine
 	go d.watchdog()
+
+	// 启动磁盘清理 goroutine（每 60 秒检查，超限删最旧文件）
+	go d.cleanupLoop()
 
 	return nil
 }
@@ -220,6 +227,81 @@ func (d *CaptureDaemon) watchdog() {
 			return
 		}
 		d.mu.Unlock()
+	}
+}
+
+// cleanupLoop 定期检查 ring 目录磁盘占用，超限时删除最旧的 pcap 文件。
+// tshark 内建的 -b files:N 只控制单次运行内的文件数，进程重启后旧文件残留。
+// 此 goroutine 作为目录级安全网，确保总占用不超过 RingMaxDiskMB。
+func (d *CaptureDaemon) cleanupLoop() {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+
+	maxBytes := int64(d.cfg.RingMaxDiskMB) * 1024 * 1024
+
+	for range ticker.C {
+		d.mu.Lock()
+		if !d.running {
+			d.mu.Unlock()
+			return
+		}
+		d.mu.Unlock()
+
+		d.pruneOldFiles(maxBytes)
+	}
+}
+
+// pruneOldFiles 按修改时间从旧到新删除，直到目录占用低于 maxBytes
+func (d *CaptureDaemon) pruneOldFiles(maxBytes int64) {
+	files, err := d.ListRingFiles()
+	if err != nil || len(files) == 0 {
+		return
+	}
+
+	// ListRingFiles 按修改时间降序（最新在前），反转为升序（最旧在前）
+	for i, j := 0, len(files)-1; i < j; i, j = i+1, j-1 {
+		files[i], files[j] = files[j], files[i]
+	}
+
+	// 计算当前总占用
+	var totalBytes int64
+	type fileInfo struct {
+		path string
+		size int64
+	}
+	infos := make([]fileInfo, 0, len(files))
+	for _, f := range files {
+		info, err := os.Stat(f)
+		if err != nil {
+			continue
+		}
+		infos = append(infos, fileInfo{path: f, size: info.Size()})
+		totalBytes += info.Size()
+	}
+
+	if totalBytes <= maxBytes {
+		return
+	}
+
+	// 从最旧文件开始删除，直到低于上限
+	deleted := 0
+	var freed int64
+	for _, fi := range infos {
+		if totalBytes <= maxBytes {
+			break
+		}
+		if err := os.Remove(fi.path); err != nil {
+			log.Printf("[CaptureDaemon] cleanup: remove %s failed: %v", filepath.Base(fi.path), err)
+			continue
+		}
+		totalBytes -= fi.size
+		freed += fi.size
+		deleted++
+	}
+
+	if deleted > 0 {
+		log.Printf("[CaptureDaemon] cleanup: deleted %d files, freed %d MB, remaining %d MB (limit %d MB)",
+			deleted, freed/(1024*1024), totalBytes/(1024*1024), maxBytes/(1024*1024))
 	}
 }
 

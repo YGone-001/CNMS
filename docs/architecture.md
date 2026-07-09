@@ -201,7 +201,9 @@ backend/
 - **hep**: Homer API 客户端，查询已存储的 SIP 消息（辅助）
 - **tshark_query**: 从 tshark 环形缓冲区 pcap 按条件查询全协议（兜底）
   - 复合 IMSI 过滤器：`e212.imsi || diameter.User-Name || nas_5gs.mm.suci.msin || frame contains`
-- **capture_daemon**: tshark 持续抓包守护进程，环形缓冲区 20×100MB
+  - 文件名时间预筛选：解析 pcap 文件名时间戳，只处理与查询时间窗口重叠的文件
+- **capture_daemon**: tshark 持续抓包守护进程，环形缓冲区 20×100MB，磁盘上限 6GB 自动清理
+- **data_source 字段**: 每条消息标记来源 (hep / hep_mongo / tshark / homer)
 
 **关联引擎：**
 - **correlator**: Union-Find 跨协议关联引擎
@@ -219,7 +221,7 @@ backend/
 | 2 | Homer API | 查询 Homer 已存储数据 | SIP |
 | 3 | TsharkQuery | 环形缓冲区 pcap → 复合 IMSI 过滤器 → tshark | S1AP/NGAP/SIP/Diameter/GTPv2C/PFCP/NAS/SGsAP |
 
-**处理流程:** 创建 Trace → HEPListener 查询 SIP (L1 ring + L2 MongoDB) → Homer API 查询 → TsharkQuery pcap 查询（复合 IMSI 过滤） → Union-Find 跨协议关联（含 Identity Context Tree 跨层合并） → 摘要生成 → 批量写入 MongoDB
+**处理流程:** 创建 Trace → HEPListener 查询 SIP (L1 ring + L2 MongoDB) → Homer API 查询 → TsharkQuery pcap 查询（文件名时间预筛选 + 复合 IMSI 过滤） → Union-Find 跨协议关联（含 Identity Context Tree 跨层合并 + CrossLayer 标记） → 摘要生成 → 批量写入 MongoDB
 
 #### 7. WebSocket 模块
 

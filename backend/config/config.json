@@ -31,6 +31,7 @@
     "ring_dir": "/var/spool/xcloud/signaling",
     "ring_file_size_mb": 100,
     "ring_file_count": 20,
+    "ring_max_disk_mb": 6144,
     "bpf_filter": ""
   },
   "hep_listener": {

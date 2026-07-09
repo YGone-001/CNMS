@@ -716,8 +716,9 @@ func mergeCrossLayerIdentity(uf *unionFind, messages []model.SignalingMessage,
 		return
 	}
 
-	// Step 2: 用映射合并 IMSI 组与 Call-ID 组
+	// Step 2: 用映射合并 IMSI 组与 Call-ID 组，收集跨层桥接的消息索引
 	merged := 0
+	crossLayerSet := make(map[int]struct{})
 	for cid, imsi := range callIDToIMSI {
 		imIndices, imsiOK := imsiIndex[imsi]
 		cidIndices, cidOK := callIDIndex[cid]
@@ -730,9 +731,19 @@ func mergeCrossLayerIdentity(uf *unionFind, messages []model.SignalingMessage,
 		combined = append(combined, cidIndices...)
 		unionAll(uf, combined)
 		merged++
+		// 标记所有参与跨层合并的消息
+		for _, idx := range combined {
+			crossLayerSet[idx] = struct{}{}
+		}
+	}
+
+	// Step 3: 设置跨层关联标记
+	for idx := range crossLayerSet {
+		messages[idx].CrossLayer = true
 	}
 
 	if merged > 0 {
-		log.Printf("Correlate: cross-layer identity merged %d Call-ID/IMSI bridges", merged)
+		log.Printf("Correlate: cross-layer identity merged %d Call-ID/IMSI bridges, tagged %d messages",
+			merged, len(crossLayerSet))
 	}
 }

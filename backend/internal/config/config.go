@@ -48,6 +48,7 @@ type SignalingCaptureConfig struct {
 	RingDir        string `json:"ring_dir"`           // pcap 存储目录，默认 "/var/spool/xcloud/signaling"
 	RingFileSizeMB int    `json:"ring_file_size_mb"`  // 每个文件大小 (MB)，默认 100
 	RingFileCount  int    `json:"ring_file_count"`    // 环形文件数量，默认 20
+	RingMaxDiskMB  int    `json:"ring_max_disk_mb"`   // 目录磁盘上限 (MB)，超限删最旧文件，默认 5120 (5GB)
 	BPFFilter      string `json:"bpf_filter"`         // BPF 过滤表达式
 }
 

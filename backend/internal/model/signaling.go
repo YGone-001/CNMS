@@ -33,6 +33,9 @@ type SignalingMessage struct {
 	// 关联信息
 	SessionID string `bson:"session_id,omitempty" json:"session_id,omitempty"` // PDU Session ID / EPS Bearer ID
 	CallID    string `bson:"call_id,omitempty" json:"call_id,omitempty"`       // SIP Call-ID
+	// 数据来源与关联标记
+	DataSource string `bson:"data_source,omitempty" json:"data_source,omitempty"` // hep, hep_mongo, tshark, homer
+	CrossLayer bool   `bson:"cross_layer,omitempty" json:"cross_layer,omitempty"` // true: SIP ↔ NAS/S1AP 跨层关联
 }
 
 // MessageIdentifiers 信令消息关联标识，用于跨协议关联同一用户

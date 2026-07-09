@@ -140,6 +140,7 @@ func main() {
 			RingDir:        cfg.SignalingCapture.RingDir,
 			RingFileSizeMB: cfg.SignalingCapture.RingFileSizeMB,
 			RingFileCount:  cfg.SignalingCapture.RingFileCount,
+			RingMaxDiskMB:  cfg.SignalingCapture.RingMaxDiskMB,
 			BPFFilter:      cfg.SignalingCapture.BPFFilter,
 		})
 		if err := captureDaemon.Start(); err != nil {
@@ -163,6 +164,8 @@ func main() {
 			Enabled:    cfg.HEPListener.Enabled,
 			ListenAddr: cfg.HEPListener.ListenAddr,
 			BufferSize: cfg.HEPListener.BufferSize,
+			MongoDB:    mc.GetClient(),
+			DBName:     cfg.MongoDB.Database,
 		})
 		if err := hepListener.Start(); err != nil {
 			log.Printf("warning: HEP listener start failed: %v", err)

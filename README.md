@@ -74,16 +74,18 @@ xCloud-CNMS 是一个专业的 4G/5G/IMS 核心网监控管理平台，面向电
 
 ### 🔍 信令追踪
 - 三级数据源：HEPListener（Kamailio HEP 推送）→ Homer API → tshark pcap 环形缓冲区
-- 信令持续抓包（tshark 环形缓冲区 20×100MB，BPF 信令协议过滤，崩溃自动重启）
+- 信令持续抓包（tshark 环形缓冲区 20×100MB，BPF 信令协议过滤，崩溃自动重启，磁盘上限 6GB 自动清理）
 - HEP 监听器（UDP 9060 接收 Kamailio siptrace，HEPv3 解析，两级缓存：L1 无锁 ring buffer + L2 MongoDB overflow）
 - 复合 IMSI 过滤器（e212.imsi + diameter.User-Name + nas_5gs.mm.suci.msin + frame contains，覆盖 4G/5G 全协议）
-- 跨层身份关联（Identity Context Tree：SIP ↔ NAS/S1AP 通过 Call-ID → IMSI 映射桥接）
+- pcap 文件名时间预筛选（解析文件名时间戳，只处理与查询时间窗口重叠的文件，秒级完成）
+- 跨层身份关联（Identity Context Tree：SIP ↔ NAS/S1AP 通过 Call-ID → IMSI 映射桥接 + CrossLayer 标记）
 - 跨协议关联引擎（Union-Find 10 维标识 + 7 条关联规则）
+- 数据源标签（每条消息标记来源：HEP L1 / HEP L2 / Pcap / Homer）
 - Ladder Diagram 梯形时序图（纯 SVG，虚拟滚动，协议着色，错误标记）
 - 消息详情面板（按协议类型展示不同字段，SDP 解析，原始数据预览）
 - 媒体质量展示（MOS 仪表盘、丢包/抖动/RTD 指标、rtpengine 中继映射）
 - 成功/失败摘要（注册/鉴权/会话/IMS注册/通话/短信 6 项判定 + 失败环节定位）
-- 已验证：4875 条消息，9 个网元（UE/eNB/MME/HSS/SGW/SMF/UPF/P-CSCF/S-CSCF）
+- 已验证：IMSI 417010000000002 → 542 条消息，5 个网元（eNB/MME/SMF/UPF/Diameter Peer）
 
 ### 📝 日志中心
 - 多目录日志文件、日期滚动

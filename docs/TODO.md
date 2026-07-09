@@ -28,9 +28,9 @@
   - 已完成：
     - ✅ 白屏修复（ErrorBoundary + 空值安全）
     - ✅ 移除日志扫描，改为底层真实信令捕获
-    - ✅ CaptureDaemon tshark 环形缓冲区持续抓包
+    - ✅ CaptureDaemon tshark 环形缓冲区持续抓包 + 磁盘上限 6GB 自动清理
     - ✅ TsharkQuery 从 pcap 按 IMSI/SIP/TEID 等条件查询
-    - ✅ HEPListener UDP 9060 监听 Kamailio siptrace
+    - ✅ HEPListener UDP 9060 监听 Kamailio siptrace，mongo=true 启用 L2 overflow
     - ✅ 三级数据源优先级：HEP → Homer → tshark
     - ✅ 复合 IMSI 过滤器（e212.imsi + diameter.User-Name + nas_5gs.mm.suci.msin + frame contains）
     - ✅ SIP URI IMSI 正则提取（sip:15位数字@）
@@ -41,6 +41,11 @@
     - ✅ SIP 接口映射修正（Gm=UE↔P-CSCF, Mw=P-CSCF↔I-CSCF, ISC=S-CSCF↔AS）
     - ✅ GTPv2C/PFCP/S1AP/NGAP/NAS/SGsAP 方向检测和接口映射
     - ✅ 前端 HEP 状态指示器 + 数据源标签 + 跨层关联标识
+    - ✅ 后端 Model 补 data_source / cross_layer 字段，各数据源赋值
+    - ✅ pcap 文件名时间预筛选（性能优化，271→2 文件）
+    - ✅ Correlator 跨层合并后 CrossLayer 标记
+    - ✅ 前端 HEP Status 10 秒自动刷新
+    - ✅ 端到端验证通过（IMSI 417010000000002 → 542 消息，5 网元）
   - 已知限制：
     - pcap 使用 sll 封装，tshark JSON 对 TCP 协议解析不完整
     - SIP 的 method/status_code/direction 字段可能为空

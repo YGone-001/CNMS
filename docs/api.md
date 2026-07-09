@@ -1334,7 +1334,9 @@ GET /api/v1/signaling/trace/{traceId}/messages?protocol=SIP&page=1&page_size=50
       "dst_ip": "10.45.0.1",
       "identifiers": { "imsi": "460001234567890", "supi": "imsi-460001234567890" },
       "call_id": "",
-      "session_id": "5"
+      "session_id": "5",
+      "data_source": "tshark",
+      "cross_layer": false
     }
   ],
   "total": 42,

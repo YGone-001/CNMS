@@ -54,7 +54,7 @@ func NewTsharkQuery(ringDir string) *TsharkQuery {
 //   - 多级回退: 精确过滤 → frame contains → per-protocol 全量查询
 func (q *TsharkQuery) Query(queryType, queryValue string, timeRange model.TimeRange) ([]model.SignalingMessage, error) {
 	// 1. 列出 pcap 文件
-	files, err := q.listPcapFiles()
+	files, err := q.listPcapFiles(timeRange)
 	if err != nil {
 		return nil, fmt.Errorf("list pcap files: %w", err)
 	}
@@ -316,8 +316,10 @@ func buildProtocolFilter() []string {
 // pcap 文件准备（裁剪 + 合并）
 // -----------------------------------------------------------
 
-// listPcapFiles 列出环形缓冲区中所有 pcap 文件，按修改时间升序
-func (q *TsharkQuery) listPcapFiles() ([]string, error) {
+// listPcapFiles 列出环形缓冲区中 pcap 文件，按修改时间升序。
+// 如果 timeRange 非零，通过文件名时间戳预筛选，只返回与查询时间窗口重叠的文件。
+// 文件名格式: ring_XXXXX_NNNNN_YYYYMMDDHHmmss.pcap
+func (q *TsharkQuery) listPcapFiles(timeRange model.TimeRange) ([]string, error) {
 	entries, err := os.ReadDir(q.RingDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -343,7 +345,72 @@ func (q *TsharkQuery) listPcapFiles() ([]string, error) {
 		return si.ModTime().Before(sj.ModTime())
 	})
 
+	// 按文件名时间戳预筛选，减少 editcap 处理量
+	if !timeRange.Start.IsZero() {
+		files = filterPcapByFilename(files, timeRange)
+	}
+
 	return files, nil
+}
+
+// rePcapTimestamp 匹配 pcap 文件名中的 14 位时间戳
+var rePcapTimestamp = regexp.MustCompile(`_(\d{14})\.pcap$`)
+
+// filterPcapByFilename 解析文件名中的时间戳，只保留与查询时间窗口有重叠的文件。
+// 策略：文件时间戳 < end 且 (下一文件时间戳 > start 或该文件是最后一个)
+func filterPcapByFilename(files []string, timeRange model.TimeRange) []string {
+	type tsFile struct {
+		path string
+		ts   time.Time
+	}
+	var parsed []tsFile
+	for _, f := range files {
+		base := filepath.Base(f)
+		m := rePcapTimestamp.FindStringSubmatch(base)
+		if m == nil {
+			// 无法解析时间戳的文件保留（保守策略）
+			parsed = append(parsed, tsFile{path: f})
+			continue
+		}
+		t, err := time.ParseInLocation("20060102150405", m[1], time.Local)
+		if err != nil {
+			parsed = append(parsed, tsFile{path: f})
+			continue
+		}
+		parsed = append(parsed, tsFile{path: f, ts: t})
+	}
+
+	start := timeRange.Start
+	end := timeRange.End
+	// 前后各扩展 5 分钟，防止边界遗漏
+	start = start.Add(-5 * time.Minute)
+	end = end.Add(5 * time.Minute)
+
+	var filtered []string
+	for i, pf := range parsed {
+		if pf.ts.IsZero() {
+			// 无法解析的文件保留
+			filtered = append(filtered, pf.path)
+			continue
+		}
+		// 文件覆盖的时间区间: [ts, nextTs)
+		fileEnd := end // 最后一个文件的结束用查询结束时间近似
+		if i+1 < len(parsed) && !parsed[i+1].ts.IsZero() {
+			fileEnd = parsed[i+1].ts
+		}
+		// 重叠判断: fileStart < queryEnd && fileEnd > queryStart
+		if pf.ts.Before(end) && fileEnd.After(start) {
+			filtered = append(filtered, pf.path)
+		}
+	}
+
+	if len(filtered) < len(files) {
+		log.Printf("[TsharkQuery] filename pre-filter: %d → %d files (query %s ~ %s)",
+			len(files), len(filtered),
+			timeRange.Start.Format("15:04:05"), timeRange.End.Format("15:04:05"))
+	}
+
+	return filtered
 }
 
 // preparePcap 准备查询用的 pcap 文件：
@@ -947,7 +1014,8 @@ func parseTsharkLayers(idx int, entry map[string]any) *model.SignalingMessage {
 	}
 
 	msg := &model.SignalingMessage{
-		Details: map[string]any{"packet_index": idx},
+		DataSource: "tshark",
+		Details:    map[string]any{"packet_index": idx},
 	}
 
 	// 解析 frame 时间

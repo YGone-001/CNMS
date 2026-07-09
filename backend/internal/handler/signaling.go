@@ -230,6 +230,9 @@ func (h *Handler) runSignalingTrace(traceID string, req signalingTraceRequest) {
 		if err != nil {
 			log.Printf("runSignalingTrace %s: homer search failed: %v", traceID, err)
 		} else if len(homerMsgs) > 0 {
+			for i := range homerMsgs {
+				homerMsgs[i].DataSource = "homer"
+			}
 			log.Printf("runSignalingTrace %s: got %d messages from Homer", traceID, len(homerMsgs))
 			allMessages = append(allMessages, homerMsgs...)
 		}
