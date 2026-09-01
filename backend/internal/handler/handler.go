@@ -243,7 +243,7 @@ func (h *Handler) executeAddSub(w http.ResponseWriter, r *http.Request, cmd *mml
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	coll := h.Mongo.Database.Collection("subscribers")
+	coll := h.Mongo.LegacyDB.Collection("subscribers")
 	if _, err := coll.InsertOne(ctx, sub); err != nil {
 		writeJSON(w, http.StatusInternalServerError, mmlResponse{
 			Status:  "error",
@@ -273,7 +273,7 @@ func (h *Handler) executeDelSub(w http.ResponseWriter, r *http.Request, cmd *mml
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	coll := h.Mongo.Database.Collection("subscribers")
+	coll := h.Mongo.LegacyDB.Collection("subscribers")
 	result, err := coll.DeleteOne(ctx, bson.M{"imsi": imsi})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, mmlResponse{
@@ -323,7 +323,7 @@ func (h *Handler) executeLSTSub(w http.ResponseWriter, r *http.Request, cmd *mml
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	coll := h.Mongo.Database.Collection("subscribers")
+	coll := h.Mongo.LegacyDB.Collection("subscribers")
 
 	filter := bson.M{}
 	if imsi != "" {
@@ -393,7 +393,7 @@ func (h *Handler) executeMODSub(w http.ResponseWriter, r *http.Request, cmd *mml
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	coll := h.Mongo.Database.Collection("subscribers")
+	coll := h.Mongo.LegacyDB.Collection("subscribers")
 
 	// 先查询现有用户，以便正确更新 sessions 数组
 	var sub model.Subscriber
@@ -717,7 +717,7 @@ func (h *Handler) executeBatchSub(w http.ResponseWriter, r *http.Request, cmd *m
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
-	coll := h.Mongo.Database.Collection("subscribers")
+	coll := h.Mongo.LegacyDB.Collection("subscribers")
 
 	// 跳过表头行
 	start := 0
@@ -811,7 +811,7 @@ func (h *Handler) executeExportSub(w http.ResponseWriter, r *http.Request, cmd *
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	coll := h.Mongo.Database.Collection("subscribers")
+	coll := h.Mongo.LegacyDB.Collection("subscribers")
 	cursor, err := coll.Find(ctx, bson.M{})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, mmlResponse{Status: "error", Message: "query failed: " + err.Error()})
@@ -869,7 +869,7 @@ func (h *Handler) executeImportSub(w http.ResponseWriter, r *http.Request, cmd *
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
-	coll := h.Mongo.Database.Collection("subscribers")
+	coll := h.Mongo.LegacyDB.Collection("subscribers")
 	added := 0
 	failed := 0
 

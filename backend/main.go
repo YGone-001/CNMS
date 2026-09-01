@@ -45,7 +45,15 @@ func main() {
 		log.Fatalf("mongo connect: %v", err)
 	}
 	defer mc.Close(ctx)
-	log.Printf("mongodb connected: %s/%s", cfg.MongoDB.URI, cfg.MongoDB.Database)
+
+	// 设置旧数据库引用（用于 subscribers 等共享数据）
+	if cfg.MongoDB.LegacyDatabase != "" {
+		mc.LegacyDB = mc.GetClient().Database(cfg.MongoDB.LegacyDatabase)
+		log.Printf("mongodb connected: %s/%s (legacy: %s)", cfg.MongoDB.URI, cfg.MongoDB.Database, cfg.MongoDB.LegacyDatabase)
+	} else {
+		mc.LegacyDB = mc.Database
+		log.Printf("mongodb connected: %s/%s", cfg.MongoDB.URI, cfg.MongoDB.Database)
+	}
 
 	// 创建知识库全文索引
 	solutionsColl := mc.Database.Collection("solutions")

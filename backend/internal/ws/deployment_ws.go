@@ -214,10 +214,9 @@ func (h *DeploymentWSHandler) pushBusinessMetrics(conn *websocket.Conn) {
 
 	metrics := BusinessMetricsMetrics{}
 
-	// 从 MongoDB 获取 EPC/5GC 订户数据
-	if h.mongo != nil {
-		open5gsDB := h.mongo.GetClient().Database("open5gs")
-		subscribersColl := open5gsDB.Collection("subscribers")
+	// 从 MongoDB (xCloud) 获取 EPC/5GC 订户数据
+	if h.mongo != nil && h.mongo.LegacyDB != nil {
+		subscribersColl := h.mongo.LegacyDB.Collection("subscribers")
 
 		totalCount, err := subscribersColl.CountDocuments(ctx, bson.M{})
 		if err == nil {

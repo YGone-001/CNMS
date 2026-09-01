@@ -37,13 +37,9 @@ func (h *Handler) GetBusinessMetrics(w http.ResponseWriter, r *http.Request) {
 
 	metrics := BusinessMetrics{}
 
-	// 从 MongoDB (open5gs) 获取 EPC/5GC 订户数据
-	if h.Mongo != nil {
-		client := h.Mongo.GetClient()
-		open5gsDB := client.Database("open5gs")
-
-		// 获取总订户数
-		subscribersColl := open5gsDB.Collection("subscribers")
+	// 从 MongoDB (xCloud) 获取 EPC/5GC 订户数据
+	if h.Mongo != nil && h.Mongo.LegacyDB != nil {
+		subscribersColl := h.Mongo.LegacyDB.Collection("subscribers")
 		totalCount, err := subscribersColl.CountDocuments(ctx, bson.M{})
 		if err == nil {
 			metrics.TotalSubscribers = totalCount

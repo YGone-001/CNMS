@@ -5,7 +5,8 @@
   },
   "mongodb": {
     "uri": "mongodb://mongodb:27017",
-    "database": "xCloud"
+    "database": "cnms",
+    "legacy_database": "xcloud"
   },
   "log_dir": "/var/log/xCloud",
   "notify": {

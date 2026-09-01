@@ -13,7 +13,8 @@ import (
 // Client 封装 MongoDB 连接
 type Client struct {
 	cli      *mongo.Client
-	Database *mongo.Database
+	Database *mongo.Database  // CNMS 主数据库
+	LegacyDB *mongo.Database  // 旧数据库（subscribers 等共享数据）
 }
 
 // GetClient 获取底层的 mongo.Client

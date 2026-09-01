@@ -46,7 +46,7 @@ func (h *Handler) GetSubscribers(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	coll := h.Mongo.Database.Collection("subscribers")
+	coll := h.Mongo.LegacyDB.Collection("subscribers")
 
 	// 构建过滤条件
 	filter := bson.M{}
@@ -129,7 +129,7 @@ func (h *Handler) CreateSubscriber(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	coll := h.Mongo.Database.Collection("subscribers")
+	coll := h.Mongo.LegacyDB.Collection("subscribers")
 
 	// 检查 IMSI 是否已存在
 	count, _ := coll.CountDocuments(ctx, bson.M{"imsi": req.IMSI})
@@ -218,7 +218,7 @@ func (h *Handler) UpdateSubscriber(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	coll := h.Mongo.Database.Collection("subscribers")
+	coll := h.Mongo.LegacyDB.Collection("subscribers")
 
 	// 检查订户是否存在
 	var existing model.Subscriber
@@ -291,7 +291,7 @@ func (h *Handler) DeleteSubscriber(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	coll := h.Mongo.Database.Collection("subscribers")
+	coll := h.Mongo.LegacyDB.Collection("subscribers")
 	result, err := coll.DeleteOne(ctx, bson.M{"imsi": imsi})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, mmlResponse{Status: "error", Message: "delete failed: " + err.Error()})

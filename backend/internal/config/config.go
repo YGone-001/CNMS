@@ -14,8 +14,9 @@ type ServerConfig struct {
 
 // MongoDBConfig MongoDB 连接配置
 type MongoDBConfig struct {
-	URI      string `json:"uri"`
-	Database string `json:"database"`
+	URI             string `json:"uri"`
+	Database        string `json:"database"`
+	LegacyDatabase  string `json:"legacy_database,omitempty"` // 旧数据库名（用于 subscribers 等共享数据）
 }
 
 // NotifyConfig 告警通知配置
